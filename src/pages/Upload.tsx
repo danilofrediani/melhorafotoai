@@ -1,3 +1,6 @@
+// src/pages/Upload.tsx
+// v.FINAL-SEM-REDIMENSIONAMENTO — Envia a imagem original para máxima qualidade
+
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -82,26 +85,8 @@ export default function Upload() {
     setProcessedImages([]);
   }, []);
 
-  // --- NOVIDADE: Função para forçar o download ---
-  const handleDownload = async (url: string, filename: string) => {
-    toast.info("A preparar o download...");
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (error) {
-      console.error("Erro ao fazer o download:", error);
-      toast.error("Não foi possível fazer o download da imagem.");
-    }
-  };
-  
+  // A função 'convertToPngAndResize' foi completamente removida.
+
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
     if (selectedFiles.length === 0) return toast.error('Selecione pelo menos uma imagem.');
@@ -330,14 +315,10 @@ export default function Upload() {
                         )}
                       </div>
                       
-                      {/* --- NOVIDADE: O botão agora usa a função handleDownload --- */}
                       {image.status === 'completed' && image.processedUrl && (
-                        <Button
-                          className="mt-4 w-full"
-                          onClick={() => handleDownload(image.processedUrl!, `melhorafoto_${image.originalFile.name}`)}
-                        >
-                          <Download className="mr-2 h-4 w-4" /> Download
-                        </Button>
+                        <a href={image.processedUrl} download={`melhorafoto_${image.originalFile.name}`} className="mt-4 w-full inline-block">
+                          <Button className="w-full"><Download className="mr-2 h-4 w-4" /> Download</Button>
+                        </a>
                       )}
                     </div>
                   ))}
