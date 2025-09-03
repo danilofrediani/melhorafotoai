@@ -191,7 +191,7 @@ export default function Upload() {
 
     setIsProcessing(false);
   };
-
+console.log("Categoria selecionada atualmente é:", category); 
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
