@@ -1,6 +1,5 @@
-
 import { useState, useCallback, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,6 +11,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { projectService } from '@/lib/database';
 import { v4 as uuidv4 } from 'uuid';
+// --- NOVIDADE: Imports para o novo seletor ---
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+
 
 interface ProcessResult {
   id: string;
@@ -41,6 +44,9 @@ export default function Upload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [category, setCategory] = useState('');
+  
+  // --- NOVIDADE: Estado para a nova opção de fundo ---
+  const [backgroundOption, setBackgroundOption] = useState('manter'); // 'manter', 'neutro', 'parque'
 
   useEffect(() => {
     if (user && !profile) { refetchProfile(); }
@@ -77,7 +83,6 @@ export default function Upload() {
     setProcessedImages([]);
   }, []);
 
-  // Função de conversão (mantive o seu comportamento simples)
   const convertToPngAndResize = (file: File): Promise<Blob> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -138,45 +143,30 @@ export default function Upload() {
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
         toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
-        // chama função edge
+        // --- NOVIDADE: Envia a opção de fundo para a Edge Function ---
         const { data: processedImageRecord, error } = await supabase.functions.invoke('process-image', {
           body: {
             image_path: uploadData.path,
             processing_type: imageToProcess.category,
-            project_id: projectId
+            project_id: projectId,
+            background_option: backgroundOption,
           },
         });
         if (error || (processedImageRecord && (processedImageRecord as any).error)) {
           throw new Error(error?.message || (processedImageRecord as any).error || 'Erro na function');
         }
 
-        // ------- AQUI: resolução robusta do processedUrl -------
-        // processedImageRecord pode ter processed_url **ou** processed_file_path
         console.log('[DEBUG] process-image response:', processedImageRecord);
-
         let finalProcessedUrl: string | null = null;
-
-        // 1) se a function já retornou processed_url (preferir)
         if ((processedImageRecord as any)?.processed_url) {
           finalProcessedUrl = (processedImageRecord as any).processed_url;
         }
-
-        // 2) senão, se retornou processed_file_path, pegar publicUrl via storage
         if (!finalProcessedUrl && (processedImageRecord as any)?.processed_file_path) {
           const path = (processedImageRecord as any).processed_file_path;
           const { data: publicData } = supabase.storage.from('processed-images').getPublicUrl(path);
           finalProcessedUrl = publicData?.publicUrl ?? null;
         }
 
-        // 3) fallback: se nada, tentar usar processedImageRecord.processed_file_path diretamente (caso já seja uma URL)
-        if (!finalProcessedUrl && (processedImageRecord as any)?.processed_file_path) {
-          const maybe = (processedImageRecord as any).processed_file_path;
-          if (typeof maybe === 'string' && (maybe.startsWith('http://') || maybe.startsWith('https://'))) {
-            finalProcessedUrl = maybe;
-          }
-        }
-
-        // Atualiza o state do preview com a url final (ou null se nada encontrado)
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? {
           ...img,
           status: finalProcessedUrl ? 'completed' : 'error',
@@ -195,7 +185,7 @@ export default function Upload() {
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'error', error: (error as Error).message } : img));
         toast.error(`Falha no processamento de "${imageToProcess.originalFile.name}"`);
         setIsProcessing(false);
-        return; // interrompe o loop na primeira falha (comportamento original)
+        return;
       }
     }
 
@@ -241,7 +231,6 @@ export default function Upload() {
                 <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB</p>
                 <input id="file-input" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={handleFileSelect} className="hidden" />
               </div>
-
               {selectedFiles.length > 0 && (
                 <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                   {selectedFiles.map((file, index) => (
@@ -263,7 +252,11 @@ export default function Upload() {
           <Card className="mb-8">
             <CardHeader><CardTitle>2. Escolha a categoria</CardTitle><CardDescription>Selecione o tipo de imagem para otimizar o processamento</CardDescription></CardHeader>
             <CardContent>
-              <Select value={category} onValueChange={setCategory}>
+              {/* --- NOVIDADE: Reset da opção de fundo ao mudar a categoria --- */}
+              <Select value={category} onValueChange={(value) => {
+                setCategory(value);
+                setBackgroundOption('manter');
+              }}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Selecione uma categoria" /></SelectTrigger>
                 <SelectContent>
                   {categories.map((cat) => (
@@ -279,9 +272,41 @@ export default function Upload() {
             </CardContent>
           </Card>
 
+          {/* --- NOVIDADE: Card de fundo aparece apenas se a categoria for 'veiculos' --- */}
+          {category === 'veiculos' && (
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle>3. Opções de Fundo (Opcional)</CardTitle>
+                <CardDescription>Escolha se deseja alterar o cenário da imagem.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <RadioGroup value={backgroundOption} onValueChange={setBackgroundOption} className="gap-4">
+                  <div>
+                    <RadioGroupItem value="manter" id="manter" className="peer sr-only" />
+                    <Label htmlFor="manter" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
+                      Manter Fundo Original
+                    </Label>
+                  </div>
+                  <div>
+                    <RadioGroupItem value="neutro" id="neutro" className="peer sr-only" />
+                    <Label htmlFor="neutro" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
+                      Fundo Neutro (Estúdio)
+                    </Label>
+                  </div>
+                  <div>
+                    <RadioGroupItem value="parque" id="parque" className="peer sr-only" />
+                    <Label htmlFor="parque" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
+                      Fundo de Parque/Natureza
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </CardContent>
+            </Card>
+          )}
+
           <div className="mb-8">
             <Button size="lg" className="w-full bg-gradient-fotoperfeita hover:opacity-90" onClick={processImages} disabled={isProcessing || selectedFiles.length === 0 || !category}>
-              {isProcessing ? ( <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processando...</> ) : ( <><ImageIcon className="mr-2 h-5 w-5" /> Processar {selectedFiles.length} imagem(s)</> )}
+              {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processando...</>) : (<><ImageIcon className="mr-2 h-5 w-5" /> Processar {selectedFiles.length} imagem(s)</>)}
             </Button>
           </div>
 
@@ -303,22 +328,18 @@ export default function Upload() {
                           {image.status === 'pending' && <><span className="text-sm text-gray-500">Na fila...</span></>}
                         </div>
                       </div>
-
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <p className="text-sm font-medium mb-2">Original</p>
                           <img src={image.originalUrl} alt="Original" className="w-full aspect-square object-cover rounded-lg border" />
                         </div>
-
                         <div>
                           <p className="text-sm font-medium mb-2">Processado com MelhoraFotoAI</p>
-
                           {image.status !== 'completed' ? (
                             <div className="w-full aspect-square bg-gray-100 rounded-lg border flex items-center justify-center">
                               <Loader2 className="h-8 w-8 animate-spin text-primary" />
                             </div>
                           ) : null}
-
                           {image.status === 'completed' && image.processedUrl && (
                             <>
                               <img src={image.processedUrl} alt="Processado" className="w-full aspect-square object-cover rounded-lg border border-primary" />
@@ -327,7 +348,6 @@ export default function Upload() {
                               </a>
                             </>
                           )}
-
                           {image.status === 'error' && (
                             <div className="w-full aspect-square bg-red-50 rounded-lg border border-red-200 flex items-center justify-center text-center p-4">
                               <div className="text-red-500">
@@ -349,4 +369,3 @@ export default function Upload() {
     </div>
   );
 }
-
