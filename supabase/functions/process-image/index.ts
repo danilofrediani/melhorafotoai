@@ -1,5 +1,5 @@
 // supabase/functions/process-image/index.ts
-// vFINAL-CATEGORIAS-FUNDOS (HOTFIX) — Restaurado o categoryMap que foi apagado por engano.
+// vFINAL-SIMPLIFICADO — Remove parâmetros de tamanho e confia na imagem original
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@8.3.2";
@@ -25,6 +25,7 @@ async function callFalAI(imageUrl: string, prompt: string, settings: any, catego
   const payload = {
     prompt: prompt,
     image_url: imageUrl,
+    // Parâmetro de aspect_ratio foi removido para herdar da imagem original
     image_prompt_strength: Number(settings[`fal_strength_${category}`]) || 0.5,
     guidance_scale: Number(settings[`fal_guidance_scale_${category}`]) || 7.5,
     negative_prompt: settings[`fal_negative_prompt_${category}`] || "blurry, noisy, ugly, deformed",
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    console.log("--- [INÍCIO] Processamento de Imagem vFINAL-CATEGORIAS-FUNDOS ---");
+    console.log("--- [INÍCIO] Processamento de Imagem vFINAL-SIMPLIFICADO ---");
     const { image_path, processing_type, project_id, background_option } = await req.json();
 
     if (!image_path || !processing_type) throw new Error("Parâmetros 'image_path' ou 'processing_type' ausentes.");
@@ -84,15 +85,12 @@ Deno.serve(async (req) => {
     if (urlErr || !signedUrlData?.signedUrl) throw new Error("Erro ao gerar URL assinada para a imagem.");
     const inputImageUrl = signedUrlData.signedUrl;
 
-    // --- A CORREÇÃO ESTÁ AQUI ---
-    // Restaurando o mapa de categorias que foi apagado por engano
     const categoryMap: Record<string, string> = {
       alimentos: "prompt_modifier_food",
       veiculos: "prompt_modifier_vehicles",
       imoveis: "prompt_modifier_real_estate",
       produtos: "prompt_modifier_products",
     };
-    // -------------------------
 
     const promptColumn = categoryMap[processing_type];
     if (!promptColumn) throw new Error(`Categoria de processamento desconhecida: '${processing_type}'`);
@@ -101,8 +99,6 @@ Deno.serve(async (req) => {
 
     let finalPrompt = settings?.[promptColumn];
     if (!finalPrompt) throw new Error(`Prompt para a categoria '${processing_type}' não encontrado no banco de dados.`);
-    
-    console.log(`[INFO] Opção de fundo selecionada: ${background_option}`);
     
     let finalSettings = { ...settings }; 
 
