@@ -143,6 +143,9 @@ dependencies:
   sonner:
     specifier: ^1.5.0
     version: 1.7.4(react-dom@18.3.1)(react@18.3.1)
+  ssim.js:
+    specifier: ^3.0.0
+    version: 3.5.0
   tailwind-merge:
     specifier: ^2.5.2
     version: 2.6.0
@@ -4453,6 +4456,10 @@ packages:
     resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
     engines: {node: '>=0.10.0'}
     dev: true
+
+  /ssim.js@3.5.0:
+    resolution: {integrity: sha512-Aj6Jl2z6oDmgYFFbQqK7fght19bXdOxY7Tj03nF+03M9gCBAjeIiO8/PlEGMfKDwYpw4q6iBqVq2YuREorGg/g==}
+    dev: false
 
   /string-width@4.2.3:
     resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}
