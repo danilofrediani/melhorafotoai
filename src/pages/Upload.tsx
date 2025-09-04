@@ -1,5 +1,5 @@
 // src/pages/Upload.tsx
-// v.FINAL-SEM-REDIMENSIONAMENTO — Envia a imagem original para máxima qualidade
+// VERSÃO ESTÁVEL COMPROVADA - Com download direto e opções de fundo
 
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -16,7 +16,6 @@ import { projectService } from '@/lib/database';
 import { v4 as uuidv4 } from 'uuid';
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 
 interface ProcessResult {
@@ -85,7 +84,24 @@ export default function Upload() {
     setProcessedImages([]);
   }, []);
 
-  // A função 'convertToPngAndResize' foi completamente removida.
+  const handleDownload = async (url: string, filename: string) => {
+    toast.info("A preparar o download...");
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("Erro ao fazer o download:", error);
+      toast.error("Não foi possível fazer o download da imagem.");
+    }
+  };
 
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
@@ -290,36 +306,38 @@ export default function Upload() {
                         </div>
                       </div>
                       
-                      <div className="w-full aspect-square bg-gray-100 rounded-lg border flex items-center justify-center overflow-hidden">
-                        
-                        {image.status === 'completed' && image.processedUrl ? (
-                          <ReactCompareSlider
-                            itemOne={<ReactCompareSliderImage src={image.originalUrl} alt="Original" style={{ objectFit: 'contain' }} />}
-                            itemTwo={<ReactCompareSliderImage src={image.processedUrl} alt="Processado" style={{ objectFit: 'contain' }}/>}
-                            className="w-full h-full"
-                          />
-                        ) 
-                        : image.status === 'error' ? (
-                          <div className="text-red-500 text-center p-4">
-                            <AlertCircle className="h-8 w-8 mx-auto mb-2" />
-                            <p className="text-sm">{image.error || 'Ocorreu um erro desconhecido.'}</p>
-                          </div>
-                        ) 
-                        : (
-                          <div className="relative w-full h-full">
-                            <img src={image.originalUrl} alt="Processando" className="w-full h-full object-contain" />
-                            <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
-                              <Loader2 className="h-10 w-10 animate-spin text-white" />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-sm font-medium mb-2">Original</p>
+                          <img src={image.originalUrl} alt="Original" className="w-full aspect-square object-cover rounded-lg border" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium mb-2">Processado com MelhoraFotoAI</p>
+                          {image.status === 'completed' && image.processedUrl ? (
+                            <>
+                              <img src={image.processedUrl} alt="Processado" className="w-full aspect-square object-cover rounded-lg border border-primary" />
+                              <Button
+                                className="mt-2 w-full"
+                                onClick={() => handleDownload(image.processedUrl!, `melhorafoto_${image.originalFile.name}`)}
+                              >
+                                <Download className="mr-2 h-4 w-4" /> Download
+                              </Button>
+                            </>
+                          ) : image.status === 'error' ? (
+                            <div className="w-full aspect-square bg-red-50 rounded-lg border border-red-200 flex items-center justify-center text-center p-4">
+                              <div className="text-red-500">
+                                <AlertCircle className="h-8 w-8 mx-auto mb-2" />
+                                <p className="text-sm">{image.error || 'Ocorreu um erro'}</p>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          ) : (
+                            <div className="w-full aspect-square bg-gray-100 rounded-lg border flex items-center justify-center">
+                              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      
-                      {image.status === 'completed' && image.processedUrl && (
-                        <a href={image.processedUrl} download={`melhorafoto_${image.originalFile.name}`} className="mt-4 w-full inline-block">
-                          <Button className="w-full"><Download className="mr-2 h-4 w-4" /> Download</Button>
-                        </a>
-                      )}
+
                     </div>
                   ))}
                 </div>
