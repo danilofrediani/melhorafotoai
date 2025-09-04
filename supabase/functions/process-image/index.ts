@@ -1,6 +1,5 @@
 // supabase/functions/process-image/index.ts
-// v.CLAID-FINAL — Mantém resolução original ou maior, perfeito para download
-// Preview no slider controlado pelo frontend (object-fit: contain)
+// v.CLAID-FINAL — Corrigido: validação separada de parâmetros
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@8.3.2";
@@ -20,20 +19,13 @@ const CLAID_API_KEY = Deno.env.get("CLAID_API_KEY");
 if (!CLAID_API_KEY) throw new Error("CLAID_API_KEY não configurada");
 
 async function callClaid(imageUrl: string, adjustments: any): Promise<Uint8Array> {
-  const { sharpen, ...safeAdjustments } = adjustments || {};
-
   const payload = {
     input: imageUrl,
     operations: {
-      restorations: {
-        upscale: "smart_enhance", // melhora qualidade e pode aumentar resolução
-        polish: true,
-        decompress: "auto",
-      },
-      // ❌ removido resizing → deixa a Claid devolver maior se quiser
-      adjustments: safeAdjustments,
+      restorations: { upscale: "smart_enhance", polish: true, decompress: "auto" },
+      adjustments
     },
-    output: { format: { type: "jpeg", quality: 95 } },
+    output: { format: { type: "jpeg", quality: 95 } }
   };
 
   console.log("[CLAID] Payload enviado:", payload);
@@ -41,10 +33,10 @@ async function callClaid(imageUrl: string, adjustments: any): Promise<Uint8Array
   const response = await fetch("https://api.claid.ai/v1-beta1/image/edit", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${CLAID_API_KEY}`,
-      "Content-Type": "application/json",
+      "Authorization": `Bearer ${CLAID_API_KEY}`,
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payload)
   });
 
   const json = await response.json();
@@ -54,9 +46,7 @@ async function callClaid(imageUrl: string, adjustments: any): Promise<Uint8Array
     throw new Error(`Claid.ai retornou um erro: ${JSON.stringify(json)}`);
   }
 
-  const outputUrl =
-    json?.result?.images?.[0]?.url || json?.data?.output?.tmp_url;
-
+  const outputUrl = json?.data?.output?.tmp_url;
   if (!outputUrl) {
     throw new Error("Claid.ai não retornou uma URL válida de imagem.");
   }
@@ -76,44 +66,27 @@ Deno.serve(async (req) => {
     console.log("--- [INÍCIO] Processamento de Imagem v.CLAID-FINAL ---");
     const { image_path, processing_type, project_id } = await req.json();
 
-    if (!image_path || !processing_type)
-      throw new Error(
-        "Parâmetros 'image_path' ou 'processing_type' ausentes."
-      );
+    if (!image_path) throw new Error("Parâmetro 'image_path' ausente.");
+    if (!processing_type) throw new Error("Parâmetro 'processing_type' ausente.");
 
     // Autenticação
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) throw new Error("Cabeçalho de autorização ausente.");
-    const {
-      data: { user },
-    } = await supabaseAdmin.auth.getUser(authHeader.replace("Bearer ", ""));
+    const { data: { user } } = await supabaseAdmin.auth.getUser(authHeader.replace("Bearer ", ""));
     if (!user) throw new Error("Usuário não autenticado.");
 
     // Checagem de créditos
-    const { data: profile } = await supabaseAdmin
-      .from("users")
-      .select("remaining_images")
-      .eq("id", user.id)
-      .single();
-    if (!profile || profile.remaining_images <= 0)
-      throw new Error("Créditos insuficientes.");
+    const { data: profile } = await supabaseAdmin.from("users").select("remaining_images").eq("id", user.id).single();
+    if (!profile || profile.remaining_images <= 0) throw new Error("Créditos insuficientes.");
 
     // URL assinada
-    const { data: signedUrlData, error: urlErr } = await supabaseAdmin.storage
-      .from("uploaded-images")
-      .createSignedUrl(image_path, 300);
-    if (urlErr || !signedUrlData?.signedUrl)
-      throw new Error("Erro ao gerar URL assinada para a imagem.");
+    const { data: signedUrlData, error: urlErr } = await supabaseAdmin.storage.from("uploaded-images").createSignedUrl(image_path, 300);
+    if (urlErr || !signedUrlData?.signedUrl) throw new Error("Erro ao gerar URL assinada para a imagem.");
     const inputImageUrl = signedUrlData.signedUrl;
 
     // Configurações da plataforma
-    const { data: settings } = await supabaseAdmin
-      .from("platform_settings")
-      .select("*")
-      .eq("id", 1)
-      .single();
-    if (!settings)
-      throw new Error("Configurações da plataforma não encontradas.");
+    const { data: settings } = await supabaseAdmin.from("platform_settings").select("*").eq("id", 1).single();
+    if (!settings) throw new Error("Configurações da plataforma não encontradas.");
 
     // Map categorias → ajustes
     const categoryMap: Record<string, any> = {
@@ -124,63 +97,5 @@ Deno.serve(async (req) => {
     };
 
     const adjustments = categoryMap[processing_type];
-    if (!adjustments)
-      throw new Error(
-        `Categoria inválida ou ajustes não configurados: ${processing_type}`
-      );
-
-    // Chamada à Claid
-    const processedBytes = await callClaid(inputImageUrl, adjustments);
-
-    // Salvar no Supabase Storage
-    const processedFileName = `processed_${uuidv4()}.jpg`;
-    const processedPath = `${user.id}/${processedFileName}`;
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from("processed-images")
-      .upload(processedPath, processedBytes, {
-        contentType: "image/jpeg",
-        upsert: true,
-      });
-    if (uploadError)
-      throw new Error(
-        `Falha ao salvar a imagem processada: ${uploadError.message}`
-      );
-
-    // Decrementa créditos e salva no banco
-    await supabaseAdmin.rpc("decrement_user_credits", {
-      user_id: user.id,
-      credit_amount: 1,
-    });
-    await supabaseAdmin.from("processed_images").insert({
-      user_id: user.id,
-      processed_file_path: processedPath,
-      processing_type,
-      project_id: project_id || null,
-      ai_model_used: "claid.ai/image/edit",
-      source_image_path: image_path,
-    });
-
-    const { data: publicUrlData } = supabaseAdmin.storage
-      .from("processed-images")
-      .getPublicUrl(processedPath);
-
-    console.log("--- [FIM] Processamento concluído com sucesso ---");
-    return new Response(
-      JSON.stringify({
-        processed_file_path: processedPath,
-        processed_url: publicUrlData?.publicUrl,
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      }
-    );
-  } catch (err) {
-    console.error("[ERRO GERAL]", err);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
-  }
-});
+    if (!adjustments) throw new Error(`Cat
 
