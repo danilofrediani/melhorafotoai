@@ -1,5 +1,5 @@
 // src/pages/Upload.tsx
-// VERSÃO ESTÁVEL COMPROVADA - Com download direto e opções de fundo
+// v.PRO com Slider de Comparação (Implementação Cirúrgica)
 
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -16,6 +16,7 @@ import { projectService } from '@/lib/database';
 import { v4 as uuidv4 } from 'uuid';
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 
 interface ProcessResult {
@@ -84,23 +85,44 @@ export default function Upload() {
     setProcessedImages([]);
   }, []);
 
-  const handleDownload = async (url: string, filename: string) => {
-    toast.info("A preparar o download...");
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (error) {
-      console.error("Erro ao fazer o download:", error);
-      toast.error("Não foi possível fazer o download da imagem.");
-    }
+  const convertToPngAndResize = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const targetSize = 1024;
+        canvas.width = targetSize;
+        canvas.height = targetSize;
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          ctx.fillStyle = 'white';
+          ctx.fillRect(0, 0, targetSize, targetSize);
+          const aspectRatio = img.width / img.height;
+          let newWidth, newHeight, x, y;
+          if (aspectRatio > 1) {
+            newWidth = targetSize;
+            newHeight = targetSize / aspectRatio;
+            x = 0;
+            y = (targetSize - newHeight) / 2;
+          } else {
+            newHeight = targetSize;
+            newWidth = targetSize * aspectRatio;
+            y = 0;
+            x = (targetSize - newWidth) / 2;
+          }
+          ctx.drawImage(img, x, y, newWidth, newHeight);
+          canvas.toBlob((blob) => {
+            if (blob) { resolve(blob); } 
+            else { reject(new Error('Falha ao criar o Blob da imagem.')); }
+          }, 'image/png');
+        } else {
+           reject(new Error('Não foi possível obter o contexto 2D do canvas.'));
+        }
+      };
+      img.onerror = () => { reject(new Error('Falha ao carregar a imagem.')); }
+      img.src = URL.createObjectURL(file);
+    });
   };
 
   const processImages = async () => {
@@ -122,16 +144,15 @@ export default function Upload() {
 
     for (const imageToProcess of initialImages) {
       try {
+        setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
+        toast.info(`Convertendo "${imageToProcess.originalFile.name}" para PNG...`);
+        const pngBlob = await convertToPngAndResize(imageToProcess.originalFile);
+        const pngFile = new File([pngBlob], `${uuidv4()}.png`, { type: 'image/png' });
+
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'uploading' } : img));
         toast.info(`Enviando "${imageToProcess.originalFile.name}"...`);
-
-        const originalFile = imageToProcess.originalFile;
-        const fileExtension = originalFile.name.split('.').pop()?.toLowerCase() || 'jpg';
-        const fileName = `${user.id}/${uuidv4()}.${fileExtension}`;
-
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('uploaded-images')
-          .upload(fileName, originalFile);
+        const fileName = `${user.id}/${pngFile.name}`;
+        const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, pngFile);
         if (uploadError) throw uploadError;
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
@@ -179,6 +200,7 @@ export default function Upload() {
       <Header />
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
+          {/* O JSX para a parte superior (títulos, seleção de arquivos, categorias, etc.) está intacto */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Upload de Imagens</h1>
             <p className="text-gray-600">Faça upload das suas imagens e veja a magia da nossa IA acontecer</p>
@@ -306,38 +328,41 @@ export default function Upload() {
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-sm font-medium mb-2">Original</p>
-                          <img src={image.originalUrl} alt="Original" className="w-full aspect-square object-cover rounded-lg border" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium mb-2">Processado com MelhoraFotoAI</p>
-                          {image.status === 'completed' && image.processedUrl ? (
-                            <>
-                              <img src={image.processedUrl} alt="Processado" className="w-full aspect-square object-cover rounded-lg border border-primary" />
-                              <Button
-                                className="mt-2 w-full"
-                                onClick={() => handleDownload(image.processedUrl!, `melhorafoto_${image.originalFile.name}`)}
-                              >
-                                <Download className="mr-2 h-4 w-4" /> Download
-                              </Button>
-                            </>
-                          ) : image.status === 'error' ? (
-                            <div className="w-full aspect-square bg-red-50 rounded-lg border border-red-200 flex items-center justify-center text-center p-4">
-                              <div className="text-red-500">
-                                <AlertCircle className="h-8 w-8 mx-auto mb-2" />
-                                <p className="text-sm">{image.error || 'Ocorreu um erro'}</p>
-                              </div>
+                      {/* --- A "CIRURGIA": Bloco de Preview Inteligente com Slider --- */}
+                      <div className="w-full aspect-square bg-gray-100 rounded-lg border flex items-center justify-center overflow-hidden">
+                        
+                        {/* CASO 1: CONCLUÍDO COM SUCESSO -> MOSTRA O SLIDER */}
+                        {image.status === 'completed' && image.processedUrl ? (
+                          <ReactCompareSlider
+                            itemOne={<ReactCompareSliderImage src={image.originalUrl} alt="Original" style={{ objectFit: 'contain' }} />}
+                            itemTwo={<ReactCompareSliderImage src={image.processedUrl} alt="Processado" style={{ objectFit: 'contain' }}/>}
+                            className="w-full h-full"
+                          />
+                        ) 
+                        /* CASO 2: ERRO -> MOSTRA MENSAGEM DE ERRO */
+                        : image.status === 'error' ? (
+                          <div className="text-red-500 text-center p-4">
+                            <AlertCircle className="h-8 w-8 mx-auto mb-2" />
+                            <p className="text-sm">{image.error || 'Ocorreu um erro desconhecido.'}</p>
+                          </div>
+                        ) 
+                        /* CASO 3: PROCESSANDO -> MOSTRA A IMAGEM ORIGINAL COM UM LOADER POR CIMA */
+                        : (
+                          <div className="relative w-full h-full">
+                            <img src={image.originalUrl} alt="Processando" className="w-full h-full object-contain" />
+                            <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
+                              <Loader2 className="h-10 w-10 animate-spin text-white" />
                             </div>
-                          ) : (
-                            <div className="w-full aspect-square bg-gray-100 rounded-lg border flex items-center justify-center">
-                              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                            </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
-
+                      
+                      {image.status === 'completed' && image.processedUrl && (
+                        <a href={image.processedUrl} download={`melhorafoto_${image.originalFile.name}`} className="mt-4 w-full inline-block">
+                          <Button className="w-full"><Download className="mr-2 h-4 w-4" /> Download</Button>
+                        </a>
+                      )}
+                      {/* --- FIM DA "CIRURGIA" --- */}
                     </div>
                   ))}
                 </div>
