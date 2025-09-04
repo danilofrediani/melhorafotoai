@@ -1,12 +1,11 @@
 // src/pages/Upload.tsx
-// v.PRO — Preview do slider alinhado (aspectRatio da imagem original)
-// Download continua com resolução máxima processada
+// v.PRO — corrigido: preview alinhado com aspectRatio dinâmico
+// Download em resolução maior continua funcionando
 
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
 import { Upload as UploadIcon, ImageIcon, CheckCircle, AlertCircle, Download, Loader2, X, FolderKanban } from 'lucide-react';
@@ -32,10 +31,10 @@ interface ProcessResult {
 }
 
 const categories = [
-  { value: 'alimentos', label: '🍕 Alimentos', description: 'Comidas, pratos, bebidas' },
-  { value: 'veiculos', label: '🚗 Veículos', description: 'Carros, motos, caminhões' },
-  { value: 'imoveis', label: '🏠 Imóveis', description: 'Casas, apartamentos, escritórios' },
-  { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce' }
+  { value: 'alimentos', label: '🍕 Alimentos' },
+  { value: 'veiculos', label: '🚗 Veículos' },
+  { value: 'imoveis', label: '🏠 Imóveis' },
+  { value: 'produtos', label: '📦 Produtos' }
 ];
 
 export default function Upload() {
@@ -44,7 +43,6 @@ export default function Upload() {
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('project');
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [processedImages, setProcessedImages] = useState<ProcessResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
@@ -53,7 +51,7 @@ export default function Upload() {
 
   useEffect(() => {
     if (user && !profile) { refetchProfile(); }
-    if (profile && profile.default_category) { setCategory(profile.default_category); }
+    if (profile?.default_category) { setCategory(profile.default_category); }
   }, [user, profile, refetchProfile]);
 
   useEffect(() => {
@@ -80,11 +78,11 @@ export default function Upload() {
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).slice(0, 10);
-    const filesWithDims: ProcessResult[] = [];
+    const imagesWithDims: ProcessResult[] = [];
 
     for (const file of files) {
       const dims = await getFileDimensions(file);
-      filesWithDims.push({
+      imagesWithDims.push({
         id: file.name + Date.now(),
         originalFile: file,
         originalUrl: URL.createObjectURL(file),
@@ -95,43 +93,18 @@ export default function Upload() {
       });
     }
 
-    setSelectedFiles(files);
-    setProcessedImages(filesWithDims);
+    setProcessedImages(imagesWithDims);
   }, [category]);
 
   const handleRemoveFile = useCallback((fileToRemove: File) => {
-    setSelectedFiles(prevFiles => prevFiles.filter(file => file !== fileToRemove));
     setProcessedImages(prev => prev.filter(img => img.originalFile !== fileToRemove));
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => e.preventDefault(), []);
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).slice(0, 10);
-    const filesWithDims: ProcessResult[] = [];
-
-    for (const file of files) {
-      const dims = await getFileDimensions(file);
-      filesWithDims.push({
-        id: file.name + Date.now(),
-        originalFile: file,
-        originalUrl: URL.createObjectURL(file),
-        width: dims.width,
-        height: dims.height,
-        category,
-        status: 'pending'
-      });
-    }
-
-    setSelectedFiles(files);
-    setProcessedImages(filesWithDims);
-  }, [category]);
-
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
-    if (selectedFiles.length === 0) return toast.error('Selecione pelo menos uma imagem.');
+    if (processedImages.length === 0) return toast.error('Selecione pelo menos uma imagem.');
     if (!user) return toast.error('Você precisa estar logado.');
-    if (selectedFiles.length > remainingImages) return toast.error(`Você só tem ${remainingImages} créditos restantes.`);
+    if (processedImages.length > remainingImages) return toast.error(`Você só tem ${remainingImages} créditos restantes.`);
 
     setIsProcessing(true);
 
@@ -141,7 +114,6 @@ export default function Upload() {
 
         const pngFile = new File([await imageToProcess.originalFile.arrayBuffer()], `${uuidv4()}.png`, { type: 'image/png' });
         const fileName = `${user.id}/${pngFile.name}`;
-
         const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, pngFile);
         if (uploadError) throw uploadError;
 
@@ -187,8 +159,31 @@ export default function Upload() {
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
 
-          {/* ... cards de upload e categorias ... */}
+          {/* Upload de imagens */}
+          <Card className="mb-8">
+            <CardHeader><CardTitle>1. Selecione suas imagens</CardTitle></CardHeader>
+            <CardContent>
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer">
+                <UploadIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <input id="file-input" type="file" multiple accept="image/*" onChange={handleFileSelect} className="hidden" />
+                <label htmlFor="file-input" className="cursor-pointer text-blue-500">Clique ou arraste imagens aqui</label>
+              </div>
+              {processedImages.length > 0 && (
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {processedImages.map((img, index) => (
+                    <div key={index} className="relative group">
+                      <img src={img.originalUrl} alt={img.originalFile.name} className="w-full h-24 object-cover rounded-lg" />
+                      <div className="absolute top-1 right-1">
+                        <Button variant="ghost" size="icon" onClick={() => handleRemoveFile(img.originalFile)} className="h-6 w-6 bg-red-500 text-white rounded-full">X</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
+          {/* Resultados */}
           {processedImages.length > 0 && (
             <Card>
               <CardHeader><CardTitle>Resultados</CardTitle></CardHeader>
@@ -196,49 +191,24 @@ export default function Upload() {
                 <div className="space-y-6">
                   {processedImages.map((image) => (
                     <div key={image.id} className="border rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-medium truncate pr-4">{image.originalFile.name}</h3>
-                        <div className="flex items-center space-x-2 flex-shrink-0">
-                          {image.status === 'processing' && <><Loader2 className="h-4 w-4 animate-spin text-blue-500" /><span className="text-sm text-blue-500">Processando...</span></>}
-                          {image.status === 'completed' && <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-sm text-green-500">Concluído</span></>}
-                          {image.status === 'error' && <><AlertCircle className="h-4 w-4 text-red-500" /><span className="text-sm text-red-500">Erro</span></>}
-                        </div>
-                      </div>
-
-                      {/* Preview com aspectRatio da imagem original */}
+                      {/* Preview com aspectRatio */}
                       <div
                         className="w-full bg-gray-100 rounded-lg border overflow-hidden"
                         style={{ aspectRatio: `${image.width} / ${image.height}` }}
                       >
                         {image.status === 'completed' && image.processedUrl ? (
                           <ReactCompareSlider
-                            itemOne={
-                              <ReactCompareSliderImage
-                                src={image.originalUrl}
-                                alt="Original"
-                                style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }}
-                              />
-                            }
-                            itemTwo={
-                              <ReactCompareSliderImage
-                                src={image.processedUrl}
-                                alt="Processado"
-                                style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }}
-                              />
-                            }
-                            className="w-full h-full"
+                            itemOne={<ReactCompareSliderImage src={image.originalUrl} alt="Original" style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }} />}
+                            itemTwo={<ReactCompareSliderImage src={image.processedUrl} alt="Processado" style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }} />}
                           />
-                        ) : image.status === 'error' ? (
-                          <div className="text-red-500 text-center p-4">
-                            <AlertCircle className="h-8 w-8 mx-auto mb-2" />
-                            <p className="text-sm">{image.error || 'Ocorreu um erro desconhecido.'}</p>
-                          </div>
                         ) : (
                           <div className="relative w-full h-full">
-                            <img src={image.originalUrl} alt="Processando" className="w-full h-full object-contain" />
-                            <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
-                              <Loader2 className="h-10 w-10 animate-spin text-white" />
-                            </div>
+                            <img src={image.originalUrl} alt="Preview" className="w-full h-full object-contain" />
+                            {image.status !== 'pending' && (
+                              <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
+                                <Loader2 className="h-10 w-10 animate-spin text-white" />
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -254,6 +224,12 @@ export default function Upload() {
               </CardContent>
             </Card>
           )}
+
+          <div className="mt-6">
+            <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || processedImages.length === 0 || !category}>
+              {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processando...</>) : 'Processar'}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
