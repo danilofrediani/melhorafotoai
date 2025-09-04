@@ -1,11 +1,11 @@
 // src/pages/Upload.tsx
-// v.PRO — corrigido: preview alinhado com aspectRatio dinâmico
-// Download em resolução maior continua funcionando
+// v.PRO — Mantém categorias e opções originais + aspectRatio dinâmico no preview
 
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
 import { Upload as UploadIcon, ImageIcon, CheckCircle, AlertCircle, Download, Loader2, X, FolderKanban } from 'lucide-react';
@@ -31,10 +31,10 @@ interface ProcessResult {
 }
 
 const categories = [
-  { value: 'alimentos', label: '🍕 Alimentos' },
-  { value: 'veiculos', label: '🚗 Veículos' },
-  { value: 'imoveis', label: '🏠 Imóveis' },
-  { value: 'produtos', label: '📦 Produtos' }
+  { value: 'alimentos', label: '🍕 Alimentos', description: 'Comidas, pratos, bebidas' },
+  { value: 'veiculos', label: '🚗 Veículos', description: 'Carros, motos, caminhões' },
+  { value: 'imoveis', label: '🏠 Imóveis', description: 'Casas, apartamentos, escritórios' },
+  { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce' }
 ];
 
 export default function Upload() {
@@ -159,29 +159,85 @@ export default function Upload() {
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
 
-          {/* Upload de imagens */}
+          {/* Título + Créditos */}
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold mb-2">Upload de Imagens</h1>
+            <p className="text-gray-600">Faça upload das suas imagens e veja a magia da nossa IA acontecer</p>
+            {projectId && (
+              <Alert variant="default" className="mt-4 bg-blue-50 border-blue-200">
+                <FolderKanban className="h-4 w-4 text-blue-700" />
+                <AlertDescription className="text-blue-700 font-medium">Imagens serão adicionadas ao projeto: {projectName || 'Carregando...'}</AlertDescription>
+              </Alert>
+            )}
+            <div className="mt-4 flex items-center space-x-4">
+              <div className="flex items-center space-x-2 bg-white px-4 py-2 rounded-full border">
+                <ImageIcon className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">{remainingImages} imagens restantes</span>
+              </div>
+              {remainingImages < processedImages.length && (
+                <Button size="sm" onClick={() => navigate('/pricing')}>Comprar mais créditos</Button>
+              )}
+            </div>
+          </div>
+
+          {/* Upload */}
           <Card className="mb-8">
-            <CardHeader><CardTitle>1. Selecione suas imagens</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>1. Selecione suas imagens</CardTitle>
+              <CardDescription>Arraste e solte ou clique para selecionar (máximo 10 imagens)</CardDescription>
+            </CardHeader>
             <CardContent>
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer">
                 <UploadIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 <input id="file-input" type="file" multiple accept="image/*" onChange={handleFileSelect} className="hidden" />
                 <label htmlFor="file-input" className="cursor-pointer text-blue-500">Clique ou arraste imagens aqui</label>
               </div>
-              {processedImages.length > 0 && (
-                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {processedImages.map((img, index) => (
-                    <div key={index} className="relative group">
-                      <img src={img.originalUrl} alt={img.originalFile.name} className="w-full h-24 object-cover rounded-lg" />
-                      <div className="absolute top-1 right-1">
-                        <Button variant="ghost" size="icon" onClick={() => handleRemoveFile(img.originalFile)} className="h-6 w-6 bg-red-500 text-white rounded-full">X</Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </CardContent>
           </Card>
+
+          {/* Categoria */}
+          <Card className="mb-8">
+            <CardHeader><CardTitle>2. Escolha a categoria</CardTitle></CardHeader>
+            <CardContent>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Selecione uma categoria" /></SelectTrigger>
+                <SelectContent>
+                  {categories.map((cat) => (
+                    <SelectItem key={cat.value} value={cat.value}>
+                      <div>
+                        <div className="font-medium">{cat.label}</div>
+                        <div className="text-sm text-gray-500">{cat.description}</div>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          {/* Opções de Fundo */}
+          {category === 'veiculos' && (
+            <Card className="mb-8">
+              <CardHeader><CardTitle>3. Opções de Fundo (Opcional)</CardTitle></CardHeader>
+              <CardContent>
+                <RadioGroup value={backgroundOption} onValueChange={setBackgroundOption} className="gap-4">
+                  <Label htmlFor="manter">Manter Fundo Original</Label>
+                  <RadioGroupItem value="manter" id="manter" />
+                  <Label htmlFor="neutro">Fundo Neutro (Estúdio)</Label>
+                  <RadioGroupItem value="neutro" id="neutro" />
+                  <Label htmlFor="parque">Fundo de Parque/Natureza</Label>
+                  <RadioGroupItem value="parque" id="parque" />
+                </RadioGroup>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Processar */}
+          <div className="mb-8">
+            <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || processedImages.length === 0 || !category}>
+              {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processando...</>) : 'Processar'}
+            </Button>
+          </div>
 
           {/* Resultados */}
           {processedImages.length > 0 && (
@@ -191,7 +247,7 @@ export default function Upload() {
                 <div className="space-y-6">
                   {processedImages.map((image) => (
                     <div key={image.id} className="border rounded-lg p-4">
-                      {/* Preview com aspectRatio */}
+                      <h3 className="font-medium truncate mb-2">{image.originalFile.name}</h3>
                       <div
                         className="w-full bg-gray-100 rounded-lg border overflow-hidden"
                         style={{ aspectRatio: `${image.width} / ${image.height}` }}
@@ -202,7 +258,7 @@ export default function Upload() {
                             itemTwo={<ReactCompareSliderImage src={image.processedUrl} alt="Processado" style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }} />}
                           />
                         ) : (
-                          <div className="relative w-full h-full">
+                          <div className="relative w-full h-full flex items-center justify-center">
                             <img src={image.originalUrl} alt="Preview" className="w-full h-full object-contain" />
                             {image.status !== 'pending' && (
                               <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
@@ -212,7 +268,6 @@ export default function Upload() {
                           </div>
                         )}
                       </div>
-
                       {image.status === 'completed' && image.processedUrl && (
                         <a href={image.processedUrl} download={`melhorafoto_${image.originalFile.name}`} className="mt-4 w-full inline-block">
                           <Button className="w-full"><Download className="mr-2 h-4 w-4" /> Download</Button>
@@ -224,12 +279,6 @@ export default function Upload() {
               </CardContent>
             </Card>
           )}
-
-          <div className="mt-6">
-            <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || processedImages.length === 0 || !category}>
-              {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processando...</>) : 'Processar'}
-            </Button>
-          </div>
         </div>
       </div>
     </div>
