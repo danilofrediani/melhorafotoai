@@ -1,5 +1,6 @@
 // src/pages/Upload.tsx
-// v.PRO — Upload com slider alinhado (object-contain no preview)
+// v.PRO — Preview do slider alinhado (aspectRatio da imagem original)
+// Download continua com resolução máxima processada
 
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -22,6 +23,8 @@ interface ProcessResult {
   id: string;
   originalFile: File;
   originalUrl: string;
+  width: number;
+  height: number;
   category: string;
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'converting';
   processedUrl?: string | null;
@@ -65,63 +68,64 @@ export default function Upload() {
 
   const remainingImages = profile?.remaining_images ?? 0;
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).slice(0, 10);
-    setSelectedFiles(files);
-    setProcessedImages([]);
-  }, []);
-
-  const handleRemoveFile = useCallback((fileToRemove: File) => {
-    setSelectedFiles(prevFiles => prevFiles.filter(file => file !== fileToRemove));
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => e.preventDefault(), []);
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).slice(0, 10);
-    setSelectedFiles(files);
-    setProcessedImages([]);
-  }, []);
-
-  const convertToPngAndResize = (file: File): Promise<Blob> => {
+  // Função auxiliar: lê dimensões de um File
+  const getFileDimensions = (file: File): Promise<{ width: number; height: number }> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const targetSize = 1024;
-        canvas.width = targetSize;
-        canvas.height = targetSize;
-        const ctx = canvas.getContext('2d');
-
-        if (ctx) {
-          ctx.fillStyle = 'white';
-          ctx.fillRect(0, 0, targetSize, targetSize);
-          const aspectRatio = img.width / img.height;
-          let newWidth, newHeight, x, y;
-          if (aspectRatio > 1) {
-            newWidth = targetSize;
-            newHeight = targetSize / aspectRatio;
-            x = 0;
-            y = (targetSize - newHeight) / 2;
-          } else {
-            newHeight = targetSize;
-            newWidth = targetSize * aspectRatio;
-            y = 0;
-            x = (targetSize - newWidth) / 2;
-          }
-          ctx.drawImage(img, x, y, newWidth, newHeight);
-          canvas.toBlob((blob) => {
-            if (blob) { resolve(blob); } 
-            else { reject(new Error('Falha ao criar o Blob da imagem.')); }
-          }, 'image/png');
-        } else {
-           reject(new Error('Não foi possível obter o contexto 2D do canvas.'));
-        }
-      };
-      img.onerror = () => { reject(new Error('Falha ao carregar a imagem.')); }
+      img.onload = () => resolve({ width: img.width, height: img.height });
+      img.onerror = () => reject(new Error("Falha ao carregar a imagem."));
       img.src = URL.createObjectURL(file);
     });
   };
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).slice(0, 10);
+    const filesWithDims: ProcessResult[] = [];
+
+    for (const file of files) {
+      const dims = await getFileDimensions(file);
+      filesWithDims.push({
+        id: file.name + Date.now(),
+        originalFile: file,
+        originalUrl: URL.createObjectURL(file),
+        width: dims.width,
+        height: dims.height,
+        category,
+        status: 'pending'
+      });
+    }
+
+    setSelectedFiles(files);
+    setProcessedImages(filesWithDims);
+  }, [category]);
+
+  const handleRemoveFile = useCallback((fileToRemove: File) => {
+    setSelectedFiles(prevFiles => prevFiles.filter(file => file !== fileToRemove));
+    setProcessedImages(prev => prev.filter(img => img.originalFile !== fileToRemove));
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => e.preventDefault(), []);
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files).slice(0, 10);
+    const filesWithDims: ProcessResult[] = [];
+
+    for (const file of files) {
+      const dims = await getFileDimensions(file);
+      filesWithDims.push({
+        id: file.name + Date.now(),
+        originalFile: file,
+        originalUrl: URL.createObjectURL(file),
+        width: dims.width,
+        height: dims.height,
+        category,
+        status: 'pending'
+      });
+    }
+
+    setSelectedFiles(files);
+    setProcessedImages(filesWithDims);
+  }, [category]);
 
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
@@ -130,40 +134,25 @@ export default function Upload() {
     if (selectedFiles.length > remainingImages) return toast.error(`Você só tem ${remainingImages} créditos restantes.`);
 
     setIsProcessing(true);
-    const initialImages = selectedFiles.map(file => ({
-      id: file.name + Date.now(),
-      originalFile: file,
-      originalUrl: URL.createObjectURL(file),
-      category,
-      status: 'pending'
-    }));
-    setProcessedImages(initialImages);
-    setSelectedFiles([]);
 
-    for (const imageToProcess of initialImages) {
+    for (const imageToProcess of processedImages) {
       try {
-        setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
-        toast.info(`Convertendo "${imageToProcess.originalFile.name}" para PNG...`);
-        const pngBlob = await convertToPngAndResize(imageToProcess.originalFile);
-        const pngFile = new File([pngBlob], `${uuidv4()}.png`, { type: 'image/png' });
-
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'uploading' } : img));
-        toast.info(`Enviando "${imageToProcess.originalFile.name}"...`);
+
+        const pngFile = new File([await imageToProcess.originalFile.arrayBuffer()], `${uuidv4()}.png`, { type: 'image/png' });
         const fileName = `${user.id}/${pngFile.name}`;
+
         const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, pngFile);
         if (uploadError) throw uploadError;
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
-        toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
         const { data, error } = await supabase.functions.invoke('process-image', {
           body: { image_path: uploadData.path, processing_type: imageToProcess.category, project_id: projectId, background_option: backgroundOption },
         });
-        
-        console.log('[DEBUG] process-image response:', data);
-        const processedImageRecord = data?.data || data;
 
-        if (error || (processedImageRecord && processedImageRecord.error)) {
+        const processedImageRecord = data?.data || data;
+        if (error || processedImageRecord?.error) {
           throw new Error(error?.message || processedImageRecord.error || 'Erro na function');
         }
 
@@ -179,8 +168,6 @@ export default function Upload() {
         if (finalProcessedUrl) {
           toast.success(`"${imageToProcess.originalFile.name}" melhorada!`);
           await refetchProfile();
-        } else {
-           toast.error(`Falha no processamento de "${imageToProcess.originalFile.name}".`);
         }
 
       } catch (error) {
@@ -190,6 +177,7 @@ export default function Upload() {
         return;
       }
     }
+
     setIsProcessing(false);
   };
 
@@ -198,7 +186,8 @@ export default function Upload() {
       <Header />
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          {/* ... cabeçalho e seleção de arquivos (igual ao seu código) ... */}
+
+          {/* ... cards de upload e categorias ... */}
 
           {processedImages.length > 0 && (
             <Card>
@@ -216,21 +205,25 @@ export default function Upload() {
                         </div>
                       </div>
 
-                      <div className="w-full aspect-square bg-gray-100 rounded-lg border flex items-center justify-center overflow-hidden">
+                      {/* Preview com aspectRatio da imagem original */}
+                      <div
+                        className="w-full bg-gray-100 rounded-lg border overflow-hidden"
+                        style={{ aspectRatio: `${image.width} / ${image.height}` }}
+                      >
                         {image.status === 'completed' && image.processedUrl ? (
                           <ReactCompareSlider
                             itemOne={
                               <ReactCompareSliderImage
                                 src={image.originalUrl}
                                 alt="Original"
-                                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                                style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }}
                               />
                             }
                             itemTwo={
                               <ReactCompareSliderImage
                                 src={image.processedUrl}
                                 alt="Processado"
-                                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                                style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }}
                               />
                             }
                             className="w-full h-full"
