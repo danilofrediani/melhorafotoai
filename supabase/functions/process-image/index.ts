@@ -1,5 +1,5 @@
 // supabase/functions/process-image/index.ts
-// vFINAL-PRO-HOTFIX — Corrigida a função fetchJsonSafe para evitar 'Body already consumed'
+// v.CLAID-ADAPTADO — Integração com Claid.ai Image Editing API
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@8.3.2";
@@ -15,65 +15,43 @@ const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 );
 
-const FAL_API_KEY = Deno.env.get("FAL_API_KEY");
-if (!FAL_API_KEY) throw new Error("FAL_API_KEY não configurada");
+const CLAID_API_KEY = Deno.env.get("CLAID_API_KEY");
+if (!CLAID_API_KEY) throw new Error("CLAID_API_KEY não configurada");
 
-const FAL_MODEL_ENDPOINT = "https://fal.run/fal-ai/flux-pro/kontext/max";
-
-// --- FUNÇÃO CORRIGIDA ---
-// Lê o corpo da resposta como texto UMA VEZ e só depois tenta fazer o parse.
-async function fetchJsonSafe(res: Response) {
-  const bodyText = await res.text();
-  try {
-    return JSON.parse(bodyText);
-  } catch (_e) {
-    // Se o parse falhar, não era JSON. Retornamos o texto bruto para depuração.
-    return { error: "A resposta não era um JSON válido", body: bodyText };
-  }
-}
-// -----------------------
-
-async function callFalAI(imageUrl: string, prompt: string, settings: any): Promise<Uint8Array> {
+async function callClaid(imageUrl: string, prompt: string, adjustments: any): Promise<Uint8Array> {
   const payload = {
-    prompt: prompt,
-    image_url: imageUrl,
-    image_prompt_strength: Number(settings.strength) || 0.5,
-    guidance_scale: Number(settings.guidance) || 7.5,
-    negative_prompt: settings.negative_prompt || "blurry, noisy, ugly, deformed",
-    num_inference_steps: Number(settings.steps) || 40,
-    seed: Math.floor(Math.random() * 100000),
+    input: imageUrl,
+    operations: {
+      restorations: { upscale: "smart_enhance" },
+      adjustments
+    },
+    output: { format: { type: "jpeg", quality: 95 } }
   };
 
-  console.log("[FAL.AI] Payload enviado:", payload);
+  console.log("[CLAID] Payload:", payload);
 
-  const response = await fetch(FAL_MODEL_ENDPOINT, {
+  const response = await fetch("https://api.claid.ai/v1-beta1/image/edit", {
     method: "POST",
-    headers: { "Authorization": `Key ${FAL_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    headers: {
+      "Authorization": `Bearer ${CLAID_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
   });
 
-  // A nossa função corrigida vai agora lidar com a resposta de forma segura
-  const responseJson = await fetchJsonSafe(response);
-
-  // Verificamos se a resposta original teve erro de status OU se o nosso parse seguro encontrou um erro
-  if (!response.ok || responseJson.error) {
-    console.error(`[FAL.AI][ERRO] Status: ${response.status}`, responseJson);
-    const errorMessage = responseJson.error ? `${responseJson.error}: ${responseJson.body}` : JSON.stringify(responseJson);
-    throw new Error(`Fal.ai retornou um erro: ${errorMessage}`);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Claid.ai erro: ${errorText}`);
   }
 
-  const outputUrl = (responseJson as any)?.images?.[0]?.url;
-  if (!outputUrl) {
-    console.error("[FAL.AI][ERRO] Resposta da API não contém a URL da imagem.", responseJson);
-    throw new Error("A resposta da Fal.ai não continha a imagem processada.");
-  }
+  const json = await response.json();
+  const outputUrl = json?.output?.url;
+  if (!outputUrl) throw new Error("Claid.ai não retornou URL da imagem.");
 
-  const imageResponse = await fetch(outputUrl);
-  if (!imageResponse.ok) {
-    throw new Error("Não foi possível baixar a imagem final da Fal.ai.");
-  }
+  const imgResp = await fetch(outputUrl);
+  if (!imgResp.ok) throw new Error("Falha ao baixar imagem final da Claid.");
 
-  return new Uint8Array(await imageResponse.arrayBuffer());
+  return new Uint8Array(await imgResp.arrayBuffer());
 }
 
 Deno.serve(async (req) => {
@@ -82,78 +60,59 @@ Deno.serve(async (req) => {
   }
 
   try {
-    console.log("--- [INÍCIO] Processamento de Imagem vFINAL-PRO ---");
-    const { image_path, processing_type, project_id, background_option } = await req.json();
-
-    if (!image_path || !processing_type) throw new Error("Parâmetros 'image_path' ou 'processing_type' ausentes.");
+    const { image_path, processing_type, project_id } = await req.json();
+    if (!image_path || !processing_type) throw new Error("Parâmetros faltando.");
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) throw new Error("Cabeçalho de autorização ausente.");
     const { data: { user } } = await supabaseAdmin.auth.getUser(authHeader.replace("Bearer ", ""));
     if (!user) throw new Error("Usuário não autenticado.");
 
-    const { data: userProfile } = await supabaseAdmin.from("users").select("remaining_images").eq("id", user.id).single();
-    if (!userProfile || userProfile.remaining_images <= 0) throw new Error("Créditos insuficientes.");
+    const { data: profile } = await supabaseAdmin.from("users").select("remaining_images").eq("id", user.id).single();
+    if (!profile || profile.remaining_images <= 0) throw new Error("Créditos insuficientes.");
 
-    const { data: signedUrlData, error: urlErr } = await supabaseAdmin.storage.from("uploaded-images").createSignedUrl(image_path, 300);
-    if (urlErr || !signedUrlData?.signedUrl) throw new Error("Erro ao gerar URL assinada para a imagem.");
+    const { data: signedUrlData } = await supabaseAdmin.storage.from("uploaded-images").createSignedUrl(image_path, 300);
+    if (!signedUrlData?.signedUrl) throw new Error("Erro ao gerar URL assinada.");
     const inputImageUrl = signedUrlData.signedUrl;
 
-    const categoryMap: Record<string, string> = {
-      alimentos: "prompt_modifier_food",
-      veiculos: "prompt_modifier_vehicles",
-      imoveis: "prompt_modifier_real_estate",
-      produtos: "prompt_modifier_products",
-    };
-    const promptColumn = categoryMap[processing_type];
-    if (!promptColumn) throw new Error(`Categoria de processamento desconhecida: '${processing_type}'`);
-    
-    const { data: settingsFromDB } = await supabaseAdmin.from("platform_settings").select(`*`).eq("id", 1).single();
-    if (!settingsFromDB) throw new Error("Configurações da plataforma não encontradas no DB.");
+    const { data: settings } = await supabaseAdmin.from("platform_settings").select("*").eq("id", 1).single();
+    if (!settings) throw new Error("Configurações da plataforma não encontradas.");
 
-    let finalPrompt = settingsFromDB[promptColumn];
-    if (!finalPrompt) throw new Error(`Prompt para a categoria '${processing_type}' não encontrado no banco de dados.`);
-    
-    const finalSettings = {
-      strength: settingsFromDB[`fal_strength_${processing_type}`],
-      guidance: settingsFromDB[`fal_guidance_scale_${processing_type}`],
-      steps: settingsFromDB[`fal_steps_${processing_type}`],
-      negative_prompt: settingsFromDB[`fal_negative_prompt_${processing_type}`]
+    const categoryMap: Record<string, { prompt: string, adjustments: any }> = {
+      alimentos: { prompt: settings.prompt_modifier_food, adjustments: settings.claid_adjustments_food },
+      veiculos: { prompt: settings.prompt_modifier_vehicles, adjustments: settings.claid_adjustments_vehicles },
+      imoveis: { prompt: settings.prompt_modifier_real_estate, adjustments: settings.claid_adjustments_real_estate },
+      produtos: { prompt: settings.prompt_modifier_products, adjustments: settings.claid_adjustments_products },
     };
 
-    if (background_option === 'neutro') {
-      finalPrompt += settingsFromDB.fal_prompt_bkg_neutral || ", on a neutral studio background";
-      finalSettings.strength = settingsFromDB.fal_strength_bkg_change || 0.4;
-    } else if (background_option === 'parque') {
-      finalPrompt += settingsFromDB.fal_prompt_bkg_park || ", in a park with trees";
-      finalSettings.strength = settingsFromDB.fal_strength_bkg_change || 0.4;
-    }
+    const config = categoryMap[processing_type];
+    if (!config) throw new Error(`Categoria inválida: ${processing_type}`);
 
-    const processedImageBytes = await callFalAI(inputImageUrl, finalPrompt, finalSettings);
+    const processedBytes = await callClaid(inputImageUrl, config.prompt, config.adjustments);
 
-    const processedFileName = `processed_${uuidv4()}.png`;
+    const processedFileName = `processed_${uuidv4()}.jpg`;
     const processedPath = `${user.id}/${processedFileName}`;
-    const { error: uploadError } = await supabaseAdmin.storage.from("processed-images").upload(processedPath, processedImageBytes, { contentType: "image/png", upsert: true });
-    if (uploadError) throw new Error(`Falha ao salvar a imagem processada no Storage: ${uploadError.message}`);
+    const { error: uploadError } = await supabaseAdmin.storage.from("processed-images").upload(processedPath, processedBytes, { contentType: "image/jpeg", upsert: true });
+    if (uploadError) throw new Error(`Erro ao salvar imagem: ${uploadError.message}`);
 
     await supabaseAdmin.rpc("decrement_user_credits", { user_id: user.id, credit_amount: 1 });
     await supabaseAdmin.from("processed_images").insert({
-        user_id: user.id,
-        processed_file_path: processedPath,
-        processing_type: processing_type,
-        project_id: project_id || null,
-        ai_model_used: "fal-ai/flux-pro/kontext/max",
-        source_image_path: image_path,
-        prompt_usado: finalPrompt,
+      user_id: user.id,
+      processed_file_path: processedPath,
+      processing_type,
+      project_id: project_id || null,
+      ai_model_used: "claid.ai/image/edit",
+      source_image_path: image_path,
+      prompt_usado: config.prompt
     });
 
     const { data: publicUrlData } = supabaseAdmin.storage.from("processed-images").getPublicUrl(processedPath);
-    
-    console.log("--- [FIM] Processamento concluído com sucesso! ---");
+
     return new Response(JSON.stringify({ processed_file_path: processedPath, processed_url: publicUrlData?.publicUrl }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } });
 
   } catch (err) {
-    console.error("[ERRO GERAL] Um erro ocorreu durante o processamento:", err);
+    console.error("[ERRO]", err);
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } });
   }
 });
+
