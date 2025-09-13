@@ -8,22 +8,25 @@ import { ImageIcon, Upload, CreditCard, Download, Star, TrendingUp, History, Loa
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { ProcessedImage, Transaction } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
-import { imageService, subscriptionService, transactionService } from '@/lib/database';
+import { imageService, transactionService } from '@/lib/database';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase'; // Importamos o supabase client
 
-const categoryEmoji = { 'alimentos': '🍕', 'veiculos': '🚗', 'imoveis': '🏠', 'produtos': '📦' };
+const categoryEmoji = { 'alimentos': '🍕', 'produtos': '📦' };
+
+// Criamos um tipo local para refletir os dados que agora vêm do banco (com o nome do arquivo original)
+type ProcessedImageWithOriginal = ProcessedImage & {
+  uploaded_images: { original_filename: string } | null;
+};
 
 export default function Dashboard() {
   const { user, profile, refetchProfile, isLoadingProfile } = useAuth();
 
-  const [imageHistory, setImageHistory] = useState<ProcessedImage[]>([]);
+  const [imageHistory, setImageHistory] = useState<ProcessedImageWithOriginal[]>([]);
   const [transactions, setTransactions] = useState<(Transaction & { packages: { name: string } | null })[]>([]);
-  const [activeSubscription, setActiveSubscription] = useState<{ packageName: string } | null>(null);
   const [isLoadingPageData, setIsLoadingPageData] = useState(true);
 
   useEffect(() => {
-    // Se o AuthContext nos informa que tem um usuário logado, mas o perfil detalhado
-    // ainda não foi carregado para o contexto, nós pedimos para ele carregar.
     if (user && !profile) {
       refetchProfile();
     }
@@ -31,24 +34,18 @@ export default function Dashboard() {
 
   useEffect(() => {
     const loadPageData = async () => {
-      // Só buscamos os dados da página (imagens, transações, etc.)
-      // se o perfil do usuário já estiver disponível no AuthContext.
       if (profile) {
         setIsLoadingPageData(true);
         try {
           const imagesPromise = imageService.getProcessedImagesForUser(profile.id);
-          const subscriptionPromise = subscriptionService.getActiveSubscription(profile.id);
           const transactionsPromise = transactionService.getTransactionsForUser(profile.id);
 
-          const [images, subscription, userTransactions] = await Promise.all([
-            imagesPromise, subscriptionPromise, transactionsPromise
+          const [images, userTransactions] = await Promise.all([
+            imagesPromise, transactionsPromise
           ]);
           
-          setImageHistory(images);
+          setImageHistory(images as ProcessedImageWithOriginal[]);
           setTransactions(userTransactions);
-          if (subscription && subscription.packages) {
-            setActiveSubscription({ packageName: subscription.packages.name });
-          }
         } catch (error) {
           toast.error("Erro ao carregar os dados do painel.");
           console.error(error);
@@ -66,14 +63,13 @@ export default function Dashboard() {
       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
     });
   };
-
-  // Condição de carregamento: mostra se o perfil ou os dados da página estiverem carregando.
+  
   if (isLoadingProfile || (user && !profile)) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Header />
         <div className="container mx-auto p-8 text-center flex justify-center items-center h-[calc(100vh-80px)]">
-            <Loader2 className="h-10 w-10 text-primary animate-spin" />
+          <Loader2 className="h-10 w-10 text-primary animate-spin" />
         </div>
       </div>
     );
@@ -82,13 +78,13 @@ export default function Dashboard() {
   if (!profile) {
      return (
         <div className="min-h-screen bg-gray-50">
-           <Header />
-           <div className="container mx-auto p-8 text-center">
-             <p>Não foi possível carregar seu perfil. Por favor, faça o login.</p>
-             <Button asChild className="mt-4"><Link to="/login">Ir para Login</Link></Button>
-           </div>
+          <Header />
+          <div className="container mx-auto p-8 text-center">
+            <p>Não foi possível carregar seu perfil. Por favor, faça o login.</p>
+            <Button asChild className="mt-4"><Link to="/login">Ir para Login</Link></Button>
+          </div>
         </div>
-    )
+     )
   }
 
   const totalImagesProcessed = imageHistory.length;
@@ -98,6 +94,7 @@ export default function Dashboard() {
     return acc;
   }, {} as Record<string, number>);
   const mostUsedCategory = Object.entries(categoryStats).sort(([, a], [, b]) => b - a)[0];
+  const lastTransaction = transactions?.[0]; // Pega a transação mais recente
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -135,15 +132,16 @@ export default function Dashboard() {
                 <Button variant="outline" className="w-full" asChild><Link to="/pricing"><CreditCard className="mr-2 h-4 w-4" />Comprar Planos ou Créditos</Link></Button>
               </CardContent>
             </Card>
+            {/* CARD "MEU PLANO" CORRIGIDO */}
             <Card>
-              <CardHeader><CardTitle>Meu Plano</CardTitle><CardDescription>Status do seu plano atual</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Seus Créditos</CardTitle><CardDescription>Status dos seus créditos e compras</CardDescription></CardHeader>
               <CardContent>
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg mb-4">
                   <div>
-                    <p className="font-medium">{activeSubscription ? activeSubscription.packageName : 'Pacotes Avulsos'}</p>
-                    <p className="text-sm text-gray-500">{profile.remaining_images ?? 0} imagens restantes</p>
+                    <p className="font-medium">{lastTransaction ? 'Última compra:' : 'Créditos Iniciais'}</p>
+                    <p className="text-sm text-gray-500">{lastTransaction?.packages?.name || 'Pacote de boas-vindas'}</p>
                   </div>
-                  <Badge variant={activeSubscription ? "default" : "secondary"}>{activeSubscription ? 'Assinatura Ativa' : 'Créditos'}</Badge>
+                  <Badge variant="secondary">{profile.remaining_images ?? 0} restantes</Badge>
                 </div>
                 <Dialog>
                   <DialogTrigger asChild>
@@ -177,18 +175,30 @@ export default function Dashboard() {
             {isLoadingPageData ? <div className="text-center py-8"><Loader2 className="h-6 w-6 animate-spin mx-auto"/></div> :
              imageHistory.length > 0 ? (
               <div className="space-y-4">
-                {imageHistory.slice(0, 5).map((image) => (
-                  <div key={image.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
-                    <div className="flex items-center space-x-4">
-                      <div className="text-2xl">{categoryEmoji[image.processing_type as keyof typeof categoryEmoji] || '📷'}</div>
-                      <div>
-                        <p className="font-medium text-sm truncate max-w-xs">{image.processed_file_path?.split('/').pop()}</p>
-                        <p className="text-xs text-gray-500">{formatDate(image.created_at)}</p>
+                {imageHistory.slice(0, 10).map((image) => {
+                  // Constrói a URL pública para o download
+                  const publicURL = image.processed_file_path ? supabase.storage.from('processed-images').getPublicUrl(image.processed_file_path).data.publicUrl : '';
+                  // Cria um nome de arquivo amigável para o download
+                  const originalFilename = image.uploaded_images?.original_filename || 'imagem.png';
+                  const friendlyDownloadName = `${originalFilename.substring(0, originalFilename.lastIndexOf('.'))}_melhorada.png`;
+
+                  return (
+                    <div key={image.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
+                      <div className="flex items-center space-x-4">
+                        <div className="text-2xl">{categoryEmoji[image.processing_type as keyof typeof categoryEmoji] || '📷'}</div>
+                        <div>
+                          {/* Exibe o nome do arquivo original */}
+                          <p className="font-medium text-sm truncate max-w-xs">{image.uploaded_images?.original_filename || 'Nome de arquivo indisponível'}</p>
+                          <p className="text-xs text-gray-500">{formatDate(image.created_at)}</p>
+                        </div>
                       </div>
+                      {/* O botão agora é um link funcional de download */}
+                      <a href={publicURL} target="_blank" download={friendlyDownloadName} rel="noopener noreferrer">
+                        <Button size="sm" variant="outline"><Download className="h-4 w-4" /></Button>
+                      </a>
                     </div>
-                    <Button size="sm" variant="outline"><Download className="h-4 w-4" /></Button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8 text-gray-500">
