@@ -1,11 +1,11 @@
 // supabase/functions/process-image/index.ts
-// v.FALAI-DB-PROMPT — Versão final que lê prompts do banco de dados e inclui todas as correções.
+// v.FINAL-PAYLOAD-FIX — Versão final com o payload corrigido (removido o wrapper 'input').
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@8.3.2";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*", // Lembre-se de ajustar para seu domínio de produção
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -18,7 +18,6 @@ const supabaseAdmin = createClient(
 const FAL_API_KEY = Deno.env.get("FAL_API_KEY");
 if (!FAL_API_KEY) throw new Error("FAL_API_KEY não configurada");
 
-// ---------- Helpers ----------
 async function fetchImageAsBytes(url: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error("Falha ao baixar imagem final da IA.");
@@ -34,21 +33,27 @@ function pickExtAndContentType(contentType: string | null, fallback: { ext: stri
   return fallback;
 }
 
-// ---------- Fal.ai call ----------
+// CORREÇÃO FINAL: Removido o wrapper "input"
 async function falAiEdit(
   imageUrl: string,
   prompt: string
 ): Promise<{ bytes: Uint8Array; contentType:string | null }> {
+  
+  const API_URL = "https://fal.run/fal-ai/flux-pro/kontext";
+
+  // O payload agora é um objeto plano, sem o 'input:'.
   const payload = {
-    model_name: 'fal-ai/flux-pro/kontext',
     prompt: prompt,
     image_url: imageUrl,
-    output_format: "png" // Garante consistência
+    output_format: "png",
+    sync_mode: true,
+    num_images: 1
   };
 
-  console.log("[FAL.AI] Payload enviado:", payload);
+  console.log("[FAL.AI] Enviando para URL:", API_URL);
+  console.log("[FAL.AI] Payload final:", JSON.stringify(payload, null, 2));
 
-  const response = await fetch("https://fal.ai/api/v1", {
+  const response = await fetch(API_URL, {
     method: "POST",
     headers: {
       "Authorization": `Key ${FAL_API_KEY}`,
@@ -58,13 +63,16 @@ async function falAiEdit(
   });
 
   const json = await response.json();
-  console.log("[FAL.AI] Resposta recebida:", json);
 
   if (!response.ok) {
-    throw new Error(`Fal.ai retornou um erro: ${JSON.stringify(json)}`);
+    console.error("====================== FAL.AI API ERROR RESPONSE ======================");
+    console.error(json);
+    console.error("=====================================================================");
+    throw new Error(`Fal.ai retornou um status não-OK: ${response.status}.`);
   }
+  
+  console.log("[FAL.AI] Resposta recebida:", json);
 
-  // CORREÇÃO: A resposta vem em um array 'images'
   const outputUrl = json?.images?.[0]?.url;
   if (!outputUrl) throw new Error("Fal.ai não retornou uma URL válida de imagem.");
 
@@ -72,14 +80,13 @@ async function falAiEdit(
 }
 
 
-// ---------- HTTP handler ----------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   try {
-    console.log("--- [INÍCIO] Processamento de Imagem v.FALAI-DB-PROMPT ---");
+    console.log("--- [INÍCIO] Processamento de Imagem v.FINAL-PAYLOAD-FIX ---");
     const { image_path, processing_type, project_id } = await req.json();
 
     if (!image_path || !processing_type) throw new Error("Parâmetro 'image_path' ou 'processing_type' ausente.");
@@ -102,7 +109,6 @@ Deno.serve(async (req) => {
     if (urlErr || !signedUrlData?.signedUrl) throw new Error("Erro ao gerar URL assinada.");
     const inputImageUrl = signedUrlData.signedUrl;
 
-    // Lógica para buscar prompts do banco de dados
     const { data: settings } = await supabaseAdmin.from("platform_settings").select("falai_prompt_food, falai_prompt_products").eq("id", 1).single();
     if (!settings) throw new Error("Configurações da plataforma não encontradas.");
     
@@ -130,7 +136,6 @@ Deno.serve(async (req) => {
       .upload(processedPath, bytes, { contentType: extAndCt.ct, upsert: false });
     if (uploadError) throw new Error(`Falha ao salvar imagem processada: ${uploadError.message}`);
     
-    // CORREÇÃO: O nome do parâmetro é 'user_id'
     await supabaseAdmin.rpc("decrement_user_credits", { user_id: user.id, credit_amount: 1 });
     
     await supabaseAdmin.from("processed_images").insert({

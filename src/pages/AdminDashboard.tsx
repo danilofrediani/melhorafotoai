@@ -105,7 +105,25 @@ export default function AdminDashboard() {
   const resetPackageForm = () => { setPackageFormData({ name: '', type: 'avulso', images: 0, price: 0, description: '', sort_order: packages.length + 1, is_most_popular: false }); setEditingPackageId(null); };
   const handleCreateOrUpdatePackage = async () => { if (!packageFormData.name || packageFormData.images <= 0 || packageFormData.price <= 0) { toast.error('Preencha campos obrigatórios.'); return; } setLoading(true); try { if (editingPackageId) { await packageService.updatePackage(editingPackageId, packageFormData); toast.success('Pacote atualizado!'); } else { await packageService.createPackage({ ...packageFormData, is_active: true }); toast.success('Pacote criado!'); } resetPackageForm(); fetchData(); } catch (err) { toast.error('Erro ao salvar o pacote.'); console.error(err); } finally { setLoading(false); } };
   const handleEditPackageClick = (pkg: PackageType) => { setPackageFormData({ name: pkg.name || '', type: pkg.type || 'avulso', images: pkg.images || 0, price: pkg.price || 0, description: pkg.description || '', sort_order: pkg.sort_order || packages.length + 1, is_most_popular: pkg.is_most_popular || false }); setEditingPackageId(pkg.id); };
-  const handleDeletePackageClick = async (pkgId: string) => { if (window.confirm('Tem certeza?')) { setLoading(true); try { await packageService.deletePackage(pkgId); toast.success('Pacote excluído!'); fetchData(); } catch (err) { toast.error('Erro ao excluir o pacote.'); console.error(err); } finally { setLoading(false); } } };
+  
+  // FUNÇÃO CORRIGIDA (handleDeletePackageClick -> Soft Delete)
+  const handleDeletePackageClick = async (pkgId: string) => {
+    if (window.confirm('Tem certeza que deseja INATIVAR este pacote? Ele não aparecerá para novos clientes, mas o histórico será mantido.')) {
+      setLoading(true);
+      try {
+        // Em vez de deletar, atualizamos o pacote para is_active = false
+        await packageService.updatePackage(pkgId, { is_active: false });
+        toast.success('Pacote inativado com sucesso!');
+        fetchData(); // Recarrega os dados, o pacote inativo deve sumir da lista
+      } catch (err) {
+        toast.error('Erro ao inativar o pacote.');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   const handleEditUserClick = (user: DbUser) => { setSelectedUser(user); setEditingUser({ name: user.name, user_type: user.user_type }); setIsUserEditModalOpen(true); };
   const handleUpdateUser = async () => { if (!selectedUser || !editingUser) return; setUserLoading(true); try { await userService.updateUser(selectedUser.id, editingUser); toast.success('Usuário atualizado!'); setIsUserEditModalOpen(false); fetchData(); } catch (err) { toast.error('Erro ao atualizar usuário.'); console.error(err); } finally { setUserLoading(false); } };
   const handleResetPassword = async () => { if (!selectedUser || !selectedUser.email) return; const { error } = await supabase.auth.admin.generateLink({ type: 'recovery', email: selectedUser.email }); if (error) { toast.error('Erro ao enviar link.'); } else { toast.success('Link de reset enviado!'); } };
