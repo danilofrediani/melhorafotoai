@@ -21,7 +21,7 @@ interface ProcessResult {
   width: number;
   height: number;
   category: string;
-  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'converting';
+  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'converting' | 'registering';
   processedUrl?: string | null;
   error?: string;
 }
@@ -157,11 +157,39 @@ export default function Upload() {
         const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, pngFile);
         if (uploadError) throw uploadError;
 
+        // --- NOVA LÓGICA ADICIONADA AQUI ---
+        setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'registering' } : img));
+        toast.info(`Registrando "${imageToProcess.originalFile.name}"...`);
+        
+        const { data: dbRecord, error: dbError } = await supabase
+          .from('uploaded_images')
+          .insert({
+              user_id: user.id,
+              file_path: uploadData.path,
+              original_filename: imageToProcess.originalFile.name,
+              mime_type: pngFile.type,
+              file_size: pngFile.size,
+              width: imageToProcess.width,
+              height: imageToProcess.height,
+          })
+          .select('id')
+          .single();
+
+        if (dbError) throw dbError;
+        const uploadedImageId = dbRecord.id;
+        // --- FIM DA NOVA LÓGICA ---
+
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
         toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
+        // Enviamos o novo ID para a Edge Function
         const { data, error } = await supabase.functions.invoke('process-image', {
-          body: { image_path: uploadData.path, processing_type: category, project_id: projectId },
+          body: { 
+            image_path: uploadData.path, 
+            processing_type: category, 
+            project_id: projectId,
+            uploaded_image_id: uploadedImageId // <-- NOVO PARÂMETRO
+          },
         });
 
         if (error || (data && data.error)) {
@@ -307,6 +335,7 @@ export default function Upload() {
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-medium truncate pr-4">{image.originalFile.name}</h3>
                         <div className="flex items-center space-x-2 flex-shrink-0">
+                          {image.status === 'registering' && <><Loader2 className="h-4 w-4 animate-spin text-gray-500" /><span className="text-sm text-gray-500">Registrando...</span></>}
                           {image.status === 'processing' && <><Loader2 className="h-4 w-4 animate-spin text-blue-500" /><span className="text-sm text-blue-500">Processando...</span></>}
                           {image.status === 'completed' && <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-sm text-green-500">Concluído</span></>}
                           {image.status === 'error' && <><AlertCircle className="h-4 w-4 text-red-500" /><span className="text-sm text-red-500">Erro</span></>}

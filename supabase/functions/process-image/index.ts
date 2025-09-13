@@ -1,5 +1,5 @@
 // supabase/functions/process-image/index.ts
-// v.FINAL-PAYLOAD-FIX — Versão final com o payload corrigido (removido o wrapper 'input').
+// v.LINKED-IMAGES — Recebe e salva o uploaded_image_id para ligar as tabelas.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { v4 as uuidv4 } from "https://esm.sh/uuid@8.3.2";
@@ -33,7 +33,6 @@ function pickExtAndContentType(contentType: string | null, fallback: { ext: stri
   return fallback;
 }
 
-// CORREÇÃO FINAL: Removido o wrapper "input"
 async function falAiEdit(
   imageUrl: string,
   prompt: string
@@ -41,7 +40,6 @@ async function falAiEdit(
   
   const API_URL = "https://fal.run/fal-ai/flux-pro/kontext";
 
-  // O payload agora é um objeto plano, sem o 'input:'.
   const payload = {
     prompt: prompt,
     image_url: imageUrl,
@@ -86,8 +84,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    console.log("--- [INÍCIO] Processamento de Imagem v.FINAL-PAYLOAD-FIX ---");
-    const { image_path, processing_type, project_id } = await req.json();
+    console.log("--- [INÍCIO] Processamento de Imagem v.LINKED-IMAGES ---");
+    // MUDANÇA 1: Recebemos o uploaded_image_id
+    const { image_path, processing_type, project_id, uploaded_image_id } = await req.json();
 
     if (!image_path || !processing_type) throw new Error("Parâmetro 'image_path' ou 'processing_type' ausente.");
 
@@ -138,8 +137,10 @@ Deno.serve(async (req) => {
     
     await supabaseAdmin.rpc("decrement_user_credits", { user_id: user.id, credit_amount: 1 });
     
+    // MUDANÇA 2: Salvamos o uploaded_image_id no novo registro
     await supabaseAdmin.from("processed_images").insert({
       user_id: user.id,
+      uploaded_image_id: uploaded_image_id || null,
       processed_file_path: processedPath,
       processing_type,
       project_id: project_id || null,
