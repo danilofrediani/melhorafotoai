@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import Header from '@/components/Header';
-import Footer from '@/components/Footer'; // A LINHA QUE FALTAVA ESTÁ AQUI
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import Footer from '@/components/Footer';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Check, Bolt, Star, Crown, Loader2 } from 'lucide-react';
 import { packageService } from '@/lib/database';
 import type { Package as PackageType } from '@/lib/types';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
@@ -69,9 +69,19 @@ export default function Pricing() {
     }
   };
 
+  // Lógica de filtragem permanece a mesma
   const avulsoPackages = packages?.filter(p => p.type === 'avulso').sort((a, b) => a.price - b.price) || [];
   const mensalPackages = packages?.filter(p => p.type === 'mensal').sort((a, b) => a.price - b.price) || [];
   const profissionalPackages = packages?.filter(p => p.type === 'profissional').sort((a, b) => a.price - b.price) || [];
+
+  // Lógica para determinar a aba padrão
+  const getFirstAvailableTab = () => {
+    if (avulsoPackages.length > 0) return 'avulso';
+    if (mensalPackages.length > 0) return 'mensal';
+    if (profissionalPackages.length > 0) return 'profissional';
+    return ''; // Caso não haja nenhum pacote
+  };
+  const firstAvailableTab = getFirstAvailableTab();
 
   if (loading) {
     return ( <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div> );
@@ -88,10 +98,10 @@ export default function Pricing() {
         <div className="mb-4">{getIcon(pkg.type)}</div>
         <h3 className="text-xl font-bold mb-1">{pkg.name}</h3>
         <p className="text-sm text-gray-600 mb-4">{pkg.images} imagens {pkg.type !== 'avulso' ? 'por mês' : ''}</p>
-        <p className="text-4xl font-bold text-primary mb-1">R$ {finalPrice}</p>
+        <p className="text-4xl font-bold text-primary mb-1">R$ {finalPrice.replace('.', ',')}</p>
         
         <p className="text-sm text-gray-600 mb-6">
-          (R$ {pricePerImage} por imagem)
+          (R$ {pricePerImage.replace('.', ',')} por imagem)
         </p>
         
         <ul className="space-y-3 text-sm text-gray-800 text-left w-full mb-8 flex-grow">
@@ -110,18 +120,26 @@ export default function Pricing() {
     <div className="min-h-screen bg-white">
       <Header />
       <div className="container mx-auto px-4 py-16 text-center">
-        <h1 className="text-4xl font-bold mb-4">Escolha seu plano</h1>
-        <p className="text-lg text-gray-600 mb-12">Preços justos para qualquer necessidade.</p>
-        <Tabs defaultValue="mensal" className="w-full">
-          <TabsList className="mx-auto grid w-full max-w-lg grid-cols-3 mb-8">
-            <TabsTrigger value="avulso">Pacotes Avulsos</TabsTrigger>
-            <TabsTrigger value="mensal">Planos Mensais</TabsTrigger>
-            <TabsTrigger value="profissional">Planos Profissionais</TabsTrigger>
-          </TabsList>
-          <TabsContent value="avulso"><div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">{avulsoPackages.length > 0 ? avulsoPackages.map(renderPackageCard) : <p className="text-gray-600 col-span-3">Nenhum pacote avulso disponível.</p>}</div></TabsContent>
-          <TabsContent value="mensal"><div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">{mensalPackages.length > 0 ? mensalPackages.map(renderPackageCard) : <p className="text-gray-600 col-span-3">Nenhum pacote mensal disponível.</p>}</div></TabsContent>
-          <TabsContent value="profissional"><div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">{profissionalPackages.length > 0 ? profissionalPackages.map(renderPackageCard) : <p className="text-gray-600 col-span-2">Nenhum pacote profissional disponível.</p>}</div></TabsContent>
-        </Tabs>
+        <h1 className="text-4xl font-bold mb-4">Escolha o pacote ideal para você</h1>
+        <p className="text-lg text-gray-600 mb-12">Preços justos para qualquer necessidade. Cancele quando quiser.</p>
+        
+        {firstAvailableTab ? (
+          <Tabs defaultValue={firstAvailableTab} className="w-full">
+            {/* A lista de abas agora é renderizada dinamicamente */}
+            <TabsList className="mx-auto mb-8">
+              {avulsoPackages.length > 0 && <TabsTrigger value="avulso">Pacotes Avulsos</TabsTrigger>}
+              {mensalPackages.length > 0 && <TabsTrigger value="mensal">Planos Mensais</TabsTrigger>}
+              {profissionalPackages.length > 0 && <TabsTrigger value="profissional">Planos Profissionais</TabsTrigger>}
+            </TabsList>
+
+            {/* O conteúdo das abas continua o mesmo */}
+            <TabsContent value="avulso"><div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">{avulsoPackages.map(renderPackageCard)}</div></TabsContent>
+            <TabsContent value="mensal"><div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">{mensalPackages.map(renderPackageCard)}</div></TabsContent>
+            <TabsContent value="profissional"><div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">{profissionalPackages.map(renderPackageCard)}</div></TabsContent>
+          </Tabs>
+        ) : (
+          <p className="text-gray-600 col-span-3 text-center py-10">Nenhum pacote disponível no momento.</p>
+        )}
       </div>
       <Footer />
     </div>
