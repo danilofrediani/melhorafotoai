@@ -121,7 +121,7 @@ export default function Pricing() {
       <Header />
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-4xl font-bold mb-4">Escolha o pacote ideal para você</h1>
-        <p className="text-lg text-gray-600 mb-12">Preços justos para qualquer necessidade. Cancele quando quiser.</p>
+        <p className="text-lg text-gray-600 mb-12">Preços justos para qualquer necessidade.</p>
         
         {firstAvailableTab ? (
           <Tabs defaultValue={firstAvailableTab} className="w-full">
