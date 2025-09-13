@@ -1,7 +1,4 @@
 // src/pages/Upload.tsx
-// v.PRO — Mantém a UI original + aspectRatio dinâmico no preview
-// Converte para PNG mantendo o tamanho original (sem quadradão)
-
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -15,8 +12,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { projectService } from '@/lib/database';
 import { v4 as uuidv4 } from 'uuid';
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 interface ProcessResult {
@@ -33,8 +28,6 @@ interface ProcessResult {
 
 const categories = [
   { value: 'alimentos', label: '🍕 Alimentos', description: 'Comidas, pratos, bebidas' },
-  { value: 'veiculos', label: '🚗 Veículos', description: 'Carros, motos, caminhões' },
-  { value: 'imoveis', label: '🏠 Imóveis', description: 'Casas, apartamentos, escritórios' },
   { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce' }
 ];
 
@@ -49,7 +42,6 @@ export default function Upload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [category, setCategory] = useState('');
-  const [backgroundOption, setBackgroundOption] = useState('manter');
 
   useEffect(() => {
     if (user && !profile) { refetchProfile(); }
@@ -68,7 +60,6 @@ export default function Upload() {
 
   const remainingImages = profile?.remaining_images ?? 0;
 
-  // Lê dimensões reais do File
   const getFileDimensions = (file: File): Promise<{ width: number; height: number }> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -78,7 +69,6 @@ export default function Upload() {
     });
   };
 
-  // Converte para PNG mantendo as dimensões originais (sem forçar 1024 quadrado)
   const convertToPngKeepSize = (file: File): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -88,7 +78,6 @@ export default function Upload() {
         canvas.height = img.naturalHeight;
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject(new Error('Não foi possível obter o contexto 2D do canvas.'));
-        // fundo branco caso a imagem tenha transparência
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -106,7 +95,6 @@ export default function Upload() {
     const files = Array.from(e.target.files || []).slice(0, 10);
     setSelectedFiles(files);
 
-    // monta processedImages preservando sua estrutura original + width/height
     const withDims = await Promise.all(files.map(async (file) => {
       const { width, height } = await getFileDimensions(file);
       return {
@@ -156,36 +144,33 @@ export default function Upload() {
 
     setIsProcessing(true);
 
-    // percorre na mesma ordem dos processedImages
     for (const imageToProcess of processedImages) {
       try {
-        // conversão para PNG mantendo tamanho
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
         toast.info(`Convertendo "${imageToProcess.originalFile.name}" para PNG...`);
         const pngBlob = await convertToPngKeepSize(imageToProcess.originalFile);
         const pngFile = new File([pngBlob], `${uuidv4()}.png`, { type: 'image/png' });
 
-        // upload
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'uploading' } : img));
         toast.info(`Enviando "${imageToProcess.originalFile.name}"...`);
         const fileName = `${user.id}/${pngFile.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, pngFile);
         if (uploadError) throw uploadError;
 
-        // chama a Edge Function
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
         toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
         const { data, error } = await supabase.functions.invoke('process-image', {
-          body: { image_path: uploadData.path, processing_type: category, project_id: projectId, background_option: backgroundOption },
+          body: { image_path: uploadData.path, processing_type: category, project_id: projectId },
         });
 
-        const processedImageRecord = (data as any)?.data || data;
-        if (error || processedImageRecord?.error) {
-          throw new Error(error?.message || processedImageRecord.error || 'Erro na function');
+        if (error || (data && data.error)) {
+          throw new Error(error?.message || data.error || 'Erro na function');
         }
+        
+        const { data: publicUrlData } = supabase.storage.from('processed-images').getPublicUrl(data.processed_file_path);
 
-        const finalProcessedUrl = processedImageRecord?.processed_url || null;
+        const finalProcessedUrl = publicUrlData.publicUrl;
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? ({
           ...img,
@@ -217,7 +202,6 @@ export default function Upload() {
       <Header />
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          {/* Cabeçalho / créditos */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Upload de Imagens</h1>
             <p className="text-gray-600">Faça upload das suas imagens e veja a magia da nossa IA acontecer</p>
@@ -240,7 +224,6 @@ export default function Upload() {
             </div>
           </div>
 
-          {/* 1. Selecionar imagens */}
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>1. Selecione suas imagens</CardTitle>
@@ -286,14 +269,13 @@ export default function Upload() {
             </CardContent>
           </Card>
 
-          {/* 2. Categoria */}
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>2. Escolha a categoria</CardTitle>
               <CardDescription>Selecione o tipo de imagem para otimizar o processamento</CardDescription>
             </CardHeader>
             <CardContent>
-              <Select value={category} onValueChange={(value) => { setCategory(value); setBackgroundOption('manter'); }}>
+              <Select value={category} onValueChange={setCategory}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Selecione uma categoria" /></SelectTrigger>
                 <SelectContent>
                   {categories.map((cat) => (
@@ -309,46 +291,12 @@ export default function Upload() {
             </CardContent>
           </Card>
 
-          {/* 3. Opções de Fundo (apenas veículos) */}
-          {category === 'veiculos' && (
-            <Card className="mb-8">
-              <CardHeader>
-                <CardTitle>3. Opções de Fundo (Opcional)</CardTitle>
-                <CardDescription>Escolha se deseja alterar o cenário da imagem.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <RadioGroup value={backgroundOption} onValueChange={setBackgroundOption} className="gap-4">
-                  <div>
-                    <RadioGroupItem value="manter" id="manter" className="peer sr-only" />
-                    <Label htmlFor="manter" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
-                      Manter Fundo Original
-                    </Label>
-                  </div>
-                  <div>
-                    <RadioGroupItem value="neutro" id="neutro" className="peer sr-only" />
-                    <Label htmlFor="neutro" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
-                      Fundo Neutro (Estúdio)
-                    </Label>
-                  </div>
-                  <div>
-                    <RadioGroupItem value="parque" id="parque" className="peer sr-only" />
-                    <Label htmlFor="parque" className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary">
-                      Fundo de Parque/Natureza
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Botão processar */}
           <div className="mb-8">
             <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || selectedFiles.length === 0 || !category}>
               {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processando...</>) : 'Processar'}
             </Button>
           </div>
 
-          {/* Resultados */}
           {processedImages.length > 0 && (
             <Card>
               <CardHeader><CardTitle>Resultados</CardTitle></CardHeader>
@@ -365,7 +313,6 @@ export default function Upload() {
                         </div>
                       </div>
 
-                      {/* PREVIEW — usa aspectRatio da imagem original */}
                       <div
                         className="w-full bg-gray-100 rounded-lg border overflow-hidden"
                         style={{ aspectRatio: `${image.width} / ${image.height}` }}
@@ -409,4 +356,3 @@ export default function Upload() {
     </div>
   );
 }
-

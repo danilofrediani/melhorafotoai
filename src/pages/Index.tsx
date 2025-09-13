@@ -14,18 +14,6 @@ const categories = [
     features: ['Cores naturais', 'Textura realista', 'Pronto para cardápio']
   },
   {
-    icon: '🚗',
-    title: 'Veículos',
-    description: 'Destaque brilho e detalhes sem alterar imperfeições reais',
-    features: ['Brilho profissional', 'Detalhes nítidos', 'Marketing automotivo']
-  },
-  {
-    icon: '🏠',
-    title: 'Imóveis',
-    description: 'Melhore perspectiva e iluminação mantendo móveis originais',
-    features: ['Perspectiva correta', 'Iluminação natural', 'Anúncios imobiliários']
-  },
-  {
     icon: '📦',
     title: 'Produtos',
     description: 'Realce textura e logotipos com fundo contextual desfocado',
@@ -42,7 +30,7 @@ const steps = [
   {
     step: '2',
     title: 'Selecione a Categoria',
-    description: 'Escolha entre alimentos, veículos, imóveis ou produtos'
+    description: 'Escolha entre alimentos ou produtos'
   },
   {
     step: '3',
@@ -73,7 +61,7 @@ export default function Index() {
             <span className="text-gray-900">Realidade + IA</span>
           </h1>
           <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Melhore suas imagens de alimentos, veículos, imóveis e produtos com IA, 
+            Melhore suas imagens de alimentos e produtos com IA, 
             mantendo <strong>100% a realidade</strong>. Qualidade profissional em segundos.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -132,7 +120,7 @@ export default function Index() {
             <p className="text-xl text-gray-600">IA treinada para cada tipo de imagem</p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 max-w-4xl mx-auto">
             {categories.map((category, index) => (
               <Card key={index} className="hover:shadow-lg transition-shadow">
                 <CardHeader className="text-center">
