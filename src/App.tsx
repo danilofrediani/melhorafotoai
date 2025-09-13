@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PackageProvider } from '@/contexts/PackageContext';
 
+
 // Pages
 import Index from './pages/Index';
 import Login from './pages/Login';
@@ -17,6 +18,9 @@ import Pricing from './pages/Pricing';
 import NotFound from './pages/NotFound';
 import ProtectedRoute from './components/ProtectedRoute';
 import ProjectView from './pages/ProjectView';
+import Terms from './pages/Terms'; 
+import Privacy from './pages/Privacy';
+import Faq from './pages/Faq';
 
 const queryClient = new QueryClient();
 
@@ -38,6 +42,9 @@ const App = () => (
               <Route path="/upload" element={<ProtectedRoute><Upload /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
               <Route path="/project/:projectId" element={<ProtectedRoute><ProjectView /></ProtectedRoute>} />
+              <Route path="/termos" element={<Terms />} />
+              <Route path="/privacidade" element={<Privacy />} />
+              <Route path="/faq" element={<Faq />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

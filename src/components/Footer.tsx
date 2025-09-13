@@ -25,18 +25,20 @@ const Footer = () => {
             <ul className="space-y-2 text-sm">
               <li><Link to="/pricing" className="text-gray-600 hover:text-primary">Preços</Link></li>
               <li><Link to="/upload" className="text-gray-600 hover:text-primary">Upload</Link></li>
-              <li><a href="/#categorias" className="text-gray-600 hover:text-primary">Categorias</a></li>
-              <li><a href="/#como-funciona" className="text-gray-600 hover:text-primary">Como funciona</a></li>
+              {/* --- Links Corrigidos --- */}
+              <li><Link to="/#categorias" className="text-gray-600 hover:text-primary">Categorias</Link></li>
+              <li><Link to="/#como-funciona" className="text-gray-600 hover:text-primary">Como funciona</Link></li>
             </ul>
           </div>
 
           <div>
             <h3 className="font-semibold text-gray-900 mb-4">Suporte</h3>
             <ul className="space-y-2 text-sm">
-              <li><a href="mailto:suporte@melhorafotoai.com" className="text-gray-600 hover:text-primary">Contato</a></li>
-              <li><a href="/faq" className="text-gray-600 hover:text-primary">FAQ</a></li>
-              <li><a href="/termos" className="text-gray-600 hover:text-primary">Termos de uso</a></li>
-              <li><a href="/privacidade" className="text-gray-600 hover:text-primary">Privacidade</a></li>
+              <li><a href="mailto:contato@melhorafotoai.com.br" className="text-gray-600 hover:text-primary">Contato</a></li>
+              {/* --- Links Corrigidos --- */}
+              <li><Link to="/faq" className="text-gray-600 hover:text-primary">FAQ</Link></li>
+              <li><Link to="/termos" className="text-gray-600 hover:text-primary">Termos de uso</Link></li>
+              <li><Link to="/privacidade" className="text-gray-600 hover:text-primary">Privacidade</Link></li>
             </ul>
           </div>
 
