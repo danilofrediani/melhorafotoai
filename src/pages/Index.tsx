@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { ArrowRight, Star, Upload, Zap, Shield, CheckCircle } from 'lucide-react';
+// 1. IMPORTAR OS COMPONENTES DO SLIDER
+import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 const categories = [
   {
@@ -16,8 +18,8 @@ const categories = [
   {
     icon: '📦',
     title: 'Produtos',
-    description: 'Realce textura e logotipos com fundo contextual desfocado',
-    features: ['Textura destacada', 'Fundo profissional', 'E-commerce ready']
+    description: 'Transforme fotos caseiras em imagens de estúdio para seu e-commerce',
+    features: ['Fundo branco profissional', 'Sombras realistas', 'Pronto para vender']
   }
 ];
 
@@ -53,12 +55,12 @@ export default function Index() {
       <section className="bg-gradient-to-br from-blue-50 to-indigo-50 py-20">
         <div className="container mx-auto px-4 text-center">
           <Badge className="mb-6 bg-gradient-fotoperfeita text-white hover:opacity-90">
-            🤖 Tecnologia IA Própria
+            🤖 Transforme suas Fotos com IA
           </Badge>
           <h1 className="text-5xl md:text-6xl font-bold mb-6">
-            <span className="fotoperfeita-primary">MelhoraFotoAI</span>
+            <span className="fotoperfeita-primary">Fotos de Estúdio,</span>
             <br />
-            <span className="text-gray-900">Realidade + IA</span>
+            <span className="text-gray-900">com um Clique</span>
           </h1>
           <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
             Melhore suas imagens de alimentos e produtos com IA, 
@@ -81,31 +83,42 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Before/After Section */}
+      {/* Before/After Section - ATUALIZADA COM SLIDERS */}
       <section className="py-20 bg-white">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold mb-4">Antes & Depois</h2>
-            <p className="text-xl text-gray-600">Veja a diferença que nossa IA faz</p>
+            <h2 className="text-4xl font-bold mb-4">Resultados que Falam por Si</h2>
+            <p className="text-xl text-gray-600">Arraste para ver a mágica da nossa IA em ação</p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            <div className="before-after-container">
-              <div className="bg-gray-100 h-64 rounded-lg flex items-center justify-center">
-                <div className="text-center text-gray-500">
-                  <div className="text-4xl mb-2">🍕</div>
-                  <p className="text-sm">Imagem Original</p>
-                  <p className="text-xs">(Simulação)</p>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-6xl mx-auto">
+            {/* SLIDER DE ALIMENTOS */}
+            <div className="text-center">
+              <h3 className="text-2xl font-semibold mb-4">Alimentos</h3>
+              <div className="rounded-xl overflow-hidden shadow-xl border aspect-square">
+                {/* // TODO: SUBSTITUA PELAS SUAS IMAGENS
+                  // Coloque suas imagens na pasta /public/assets/examples/
+                  // Exemplo: /public/assets/examples/alimento-antes.jpg
+                */}
+                <ReactCompareSlider
+                  itemOne={<ReactCompareSliderImage src="/assets/examples/alimento-antes.jpg" alt="Alimento Antes" />}
+                  itemTwo={<ReactCompareSliderImage src="/assets/examples/alimento-depois.jpg" alt="Alimento Depois" />}
+                />
               </div>
             </div>
-            <div className="before-after-container">
-              <div className="bg-gradient-to-br from-orange-100 to-yellow-100 h-64 rounded-lg flex items-center justify-center border-2 border-primary">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">✨🍕✨</div>
-                  <p className="text-sm font-semibold text-primary">Imagem Profissional</p>
-                  <p className="text-xs text-gray-600">100% Real + IA</p>
-                </div>
+
+            {/* SLIDER DE PRODUTOS */}
+            <div className="text-center">
+              <h3 className="text-2xl font-semibold mb-4">Produtos</h3>
+              <div className="rounded-xl overflow-hidden shadow-xl border aspect-square">
+                {/* // TODO: SUBSTITUA PELAS SUAS IMAGENS
+                  // Coloque suas imagens na pasta /public/assets/examples/
+                  // Exemplo: /public/assets/examples/produto-antes.jpg
+                */}
+                <ReactCompareSlider
+                  itemOne={<ReactCompareSliderImage src="/assets/examples/produto-antes.jpg" alt="Produto Antes" />}
+                  itemTwo={<ReactCompareSliderImage src="/assets/examples/produto-depois.jpg" alt="Produto Depois" />}
+                />
               </div>
             </div>
           </div>
@@ -182,7 +195,7 @@ export default function Index() {
             <div className="text-center">
               <Zap className="w-12 h-12 text-primary mx-auto mb-4" />
               <h3 className="text-xl font-semibold mb-2">Processamento Rápido</h3>
-              <p className="text-gray-600">Resultados em segundos com nossa IA MelhoraFoto avançada.</p>
+              <p className="text-gray-600">Resultados em segundos com nossa IA avançada.</p>
             </div>
             <div className="text-center">
               <Star className="w-12 h-12 text-primary mx-auto mb-4" />
@@ -196,7 +209,7 @@ export default function Index() {
       {/* CTA Section */}
       <section className="py-20 bg-gradient-fotoperfeita text-white">
         <div className="container mx-auto px-4 text-center">
-          <h2 className="text-4xl font-bold mb-4">Pronto para começar?</h2>
+          <h2 className="text-4xl font-bold mb-4">Pronto para transformar suas fotos?</h2>
           <p className="text-xl mb-8 opacity-90">
             Teste gratuitamente com 2 imagens
           </p>
