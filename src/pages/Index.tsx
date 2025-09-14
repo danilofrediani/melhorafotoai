@@ -82,7 +82,7 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Before/After Section - COM ESTILOS CORRIGIDOS */}
+      {/* Before/After Section - COM ESTILOS DE 'CONTAIN' */}
       <section className="py-20 bg-white">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
@@ -94,17 +94,17 @@ export default function Index() {
             {/* SLIDER DE ALIMENTOS */}
             <div className="text-center">
               <h3 className="text-2xl font-semibold mb-4">Alimentos</h3>
-              <div className="rounded-xl overflow-hidden shadow-xl border aspect-square">
+              <div className="rounded-xl overflow-hidden shadow-xl border aspect-w-4 aspect-h-3">
                 <ReactCompareSlider
                   itemOne={<ReactCompareSliderImage 
                             src="/assets/examples/alimento-antes.jpg" 
                             alt="Alimento Antes" 
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }} 
                           />}
                   itemTwo={<ReactCompareSliderImage 
                             src="/assets/examples/alimento-depois.jpg" 
                             alt="Alimento Depois" 
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }}
                           />}
                 />
               </div>
@@ -113,17 +113,17 @@ export default function Index() {
             {/* SLIDER DE PRODUTOS */}
             <div className="text-center">
               <h3 className="text-2xl font-semibold mb-4">Produtos</h3>
-              <div className="rounded-xl overflow-hidden shadow-xl border aspect-square">
+              <div className="rounded-xl overflow-hidden shadow-xl border aspect-w-4 aspect-h-3">
                 <ReactCompareSlider
                   itemOne={<ReactCompareSliderImage 
                             src="/assets/examples/produto-antes.jpg" 
                             alt="Produto Antes" 
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }}
                           />}
                   itemTwo={<ReactCompareSliderImage 
                             src="/assets/examples/produto-depois.jpg" 
                             alt="Produto Depois" 
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }}
                           />}
                 />
               </div>
