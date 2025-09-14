@@ -1,12 +1,22 @@
 // src/pages/Upload.tsx
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
-import { Upload as UploadIcon, ImageIcon, CheckCircle, AlertCircle, Download, Loader2, X, FolderKanban, Camera } from 'lucide-react';
+import {
+  Upload as UploadIcon,
+  ImageIcon,
+  CheckCircle,
+  AlertCircle,
+  Download,
+  Loader2,
+  X,
+  FolderKanban,
+  Camera
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -32,6 +42,15 @@ const categories = [
   { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce' }
 ];
 
+// ===== Regras de entrada =====
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024;    // 10MB (entrada)
+const MAX_FILES = 10;
+
+// ===== Preset B (Aprovado) =====
+const PRESET_MAX_SIDE = 2048;              // px (maior lado)
+const TARGET_MAX_BYTES = 7.5 * 1024 * 1024; // 7.5MB alvo final
+
 export default function Upload() {
   const { user, profile, refetchProfile } = useAuth();
   const navigate = useNavigate();
@@ -43,6 +62,7 @@ export default function Upload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [category, setCategory] = useState('');
+  const dropRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (user && !profile) { refetchProfile(); }
@@ -70,43 +90,155 @@ export default function Upload() {
     });
   };
 
-  const convertToPngKeepSize = (file: File): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject(new Error('Não foi possível obter o contexto 2D do canvas.'));
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Falha ao criar o Blob da imagem.'));
-        }, 'image/png');
-      };
-      img.onerror = () => reject(new Error('Falha ao carregar a imagem.'));
-      img.src = URL.createObjectURL(file);
-    });
+  // ===== Utils de imagem (frontend) =====
+
+  // detecta se imagem tem transparência (amostragem em grade para performance)
+  const hasAlpha = async (bitmap: ImageBitmap): Promise<boolean> => {
+    const sampleW = 64;
+    const sampleH = Math.round((bitmap.height / bitmap.width) * sampleW) || 64;
+    const c = document.createElement('canvas');
+    c.width = sampleW;
+    c.height = sampleH;
+    const ctx = c.getContext('2d');
+    if (!ctx) return false;
+    ctx.drawImage(bitmap, 0, 0, sampleW, sampleH);
+    const data = ctx.getImageData(0, 0, sampleW, sampleH).data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) return true;
+    }
+    return false;
   };
 
-  // --- helper para unificar entrada de arquivos (drag&drop, input e câmera) ---
+  // redimensiona mantendo orientação EXIF
+  const makeBitmap = async (file: File): Promise<ImageBitmap> => {
+    try {
+      const blob = file instanceof Blob ? file : new Blob([file], { type: file.type });
+      return await createImageBitmap(blob as any, { imageOrientation: 'from-image' as any });
+    } catch {
+      // fallback simples
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('Falha ao ler imagem.'));
+        i.src = URL.createObjectURL(file);
+      });
+      const tmp = document.createElement('canvas');
+      tmp.width = img.naturalWidth;
+      tmp.height = img.naturalHeight;
+      const ctx = tmp.getContext('2d');
+      if (!ctx) throw new Error('Canvas não suportado.');
+      ctx.drawImage(img, 0, 0);
+      const b = await new Promise<Blob>((res, rej) => tmp.toBlob(bb => bb ? res(bb) : rej(new Error('Blob inválido.')), 'image/png'));
+      return await createImageBitmap(b);
+    }
+  };
+
+  // renderiza para canvas com downscale
+  const renderToCanvas = (bitmap: ImageBitmap, maxSide: number): HTMLCanvasElement => {
+    const { width: w, height: h } = bitmap;
+    const scale = Math.min(1, maxSide / Math.max(w, h));
+    const outW = Math.max(1, Math.round(w * scale));
+    const outH = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, 0, 0, outW, outH);
+    return canvas;
+  };
+
+  // exporta com qualidade adaptativa (JPEG) / PNG se alpha
+  const exportAdaptive = async (
+    canvas: HTMLCanvasElement,
+    wantAlpha: boolean,
+    targetBytes: number
+  ): Promise<Blob> => {
+    if (wantAlpha) {
+      // PNG não tem "qualidade", então controlamos pelo tamanho (dimensão)
+      let current = canvas;
+      let blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/png'));
+      if (!blob) throw new Error('Falha ao exportar PNG.');
+      while (blob.size > targetBytes && (current.width > 512 || current.height > 512)) {
+        const next = document.createElement('canvas');
+        next.width = Math.round(current.width * 0.9);
+        next.height = Math.round(current.height * 0.9);
+        const nctx = next.getContext('2d')!;
+        nctx.imageSmoothingEnabled = true;
+        nctx.imageSmoothingQuality = 'high';
+        nctx.drawImage(current, 0, 0, next.width, next.height);
+        current = next;
+        blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/png'));
+        if (!blob) throw new Error('Falha ao exportar PNG.');
+      }
+      return blob;
+    } else {
+      let q = 0.9;
+      let current = canvas;
+      let blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/jpeg', q));
+      if (!blob) throw new Error('Falha ao exportar JPEG.');
+      // primeiro tenta reduzir qualidade
+      while (blob.size > targetBytes && q > 0.6) {
+        q = Math.max(0.6, q - 0.1);
+        blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/jpeg', q));
+        if (!blob) throw new Error('Falha ao exportar JPEG.');
+      }
+      // se ainda grande, reduz dimensão
+      while (blob.size > targetBytes && (current.width > 512 || current.height > 512)) {
+        const next = document.createElement('canvas');
+        next.width = Math.round(current.width * 0.9);
+        next.height = Math.round(current.height * 0.9);
+        const nctx = next.getContext('2d')!;
+        nctx.imageSmoothingEnabled = true;
+        nctx.imageSmoothingQuality = 'high';
+        nctx.drawImage(current, 0, 0, next.width, next.height);
+        current = next;
+        blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/jpeg', q));
+        if (!blob) throw new Error('Falha ao exportar JPEG.');
+      }
+      return blob;
+    }
+  };
+
+  // ===== Conversão final para atender a Fal.ai (Preset B) =====
+  const convertForFalAI = async (file: File): Promise<{ blob: Blob; mime: string }> => {
+    const bitmap = await makeBitmap(file);
+    const alpha = await hasAlpha(bitmap);
+    const canvas = renderToCanvas(bitmap, PRESET_MAX_SIDE);
+    const blob = await exportAdaptive(canvas, alpha, TARGET_MAX_BYTES);
+    const mime = alpha ? 'image/png' : 'image/jpeg';
+    return { blob, mime };
+  };
+
+  // ===== Entrada de arquivos (drag/input/câmera/paste) =====
   const addFiles = useCallback(async (files: File[]) => {
     if (!files || files.length === 0) return;
 
-    const MAX = 10;
     const current = selectedFiles.length;
-    const available = Math.max(0, MAX - current);
+    const available = Math.max(0, MAX_FILES - current);
     const toAdd = files.slice(0, available);
 
-    if (toAdd.length === 0) {
-      toast.error('Limite de 10 imagens por vez.');
-      return;
+    if (toAdd.length < files.length) {
+      toast.warning(`Limite de ${MAX_FILES} imagens por vez. Adicionando ${toAdd.length}.`);
     }
+    if (toAdd.length === 0) return;
 
-    const newWithDims = await Promise.all(toAdd.map(async (file) => {
+    const valid: File[] = [];
+    for (const f of toAdd) {
+      if (!ACCEPTED_TYPES.includes(f.type)) {
+        toast.error(`Formato não suportado: ${f.name}`);
+        continue;
+      }
+      if (f.size > MAX_FILE_SIZE) {
+        // ainda aceitamos e trataremos na conversão; apenas aviso
+        toast.warning(`Arquivo grande (>10MB): ${f.name}. Vamos otimizar antes do envio.`);
+      }
+      valid.push(f);
+    }
+    if (valid.length === 0) return;
+
+    const withDims = await Promise.all(valid.map(async (file) => {
       const { width, height } = await getFileDimensions(file);
       return {
         id: file.name + Date.now(),
@@ -119,14 +251,13 @@ export default function Upload() {
       };
     }));
 
-    setSelectedFiles(prev => [...prev, ...toAdd]);
-    setProcessedImages(prev => [...prev, ...newWithDims]);
+    setSelectedFiles(prev => [...prev, ...valid]);
+    setProcessedImages(prev => [...prev, ...withDims]);
   }, [category, selectedFiles.length]);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     await addFiles(files);
-    // limpa para permitir nova seleção do mesmo arquivo
     e.currentTarget.value = '';
   }, [addFiles]);
 
@@ -146,6 +277,27 @@ export default function Upload() {
     await addFiles(files);
   }, [addFiles]);
 
+  // Ctrl+V
+  useEffect(() => {
+    const onPaste = async (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      const items = Array.from(e.clipboardData.items);
+      const files: File[] = [];
+      for (const it of items) {
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length) {
+        await addFiles(files);
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [addFiles]);
+
+  // ===== Processamento (upload + invoke) =====
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
     if (selectedFiles.length === 0) return toast.error('Selecione pelo menos uma imagem.');
@@ -157,48 +309,51 @@ export default function Upload() {
     for (const imageToProcess of processedImages) {
       try {
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
-        toast.info(`Convertendo "${imageToProcess.originalFile.name}" para PNG...`);
-        const pngBlob = await convertToPngKeepSize(imageToProcess.originalFile);
-        const pngFile = new File([pngBlob], `${uuidv4()}.png`, { type: 'image/png' });
+        toast.info(`Otimizando "${imageToProcess.originalFile.name}" para a IA...`);
+
+        // >>> NOVO: Converter para atender limite da Fal.ai (Preset B)
+        const { blob: finalBlob, mime } = await convertForFalAI(imageToProcess.originalFile);
+        const ext = mime === 'image/png' ? 'png' : 'jpg';
+        const optimizedFile = new File([finalBlob], `${uuidv4()}.${ext}`, { type: mime });
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'uploading' } : img));
         toast.info(`Enviando "${imageToProcess.originalFile.name}"...`);
-        const fileName = `${user.id}/${pngFile.name}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, pngFile);
+
+        const fileName = `${user.id}/${optimizedFile.name}`;
+        const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, optimizedFile);
         if (uploadError) throw uploadError;
 
-        // --- NOVA LÓGICA ADICIONADA AQUI ---
+        // registra uploaded_image (mantém dimensões originais salvas, como antes)
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'registering' } : img));
         toast.info(`Registrando "${imageToProcess.originalFile.name}"...`);
         
         const { data: dbRecord, error: dbError } = await supabase
           .from('uploaded_images')
           .insert({
-              user_id: user.id,
-              file_path: uploadData.path,
-              original_filename: imageToProcess.originalFile.name,
-              mime_type: pngFile.type,
-              file_size: pngFile.size,
-              width: imageToProcess.width,
-              height: imageToProcess.height,
+            user_id: user.id,
+            file_path: uploadData.path,
+            original_filename: imageToProcess.originalFile.name,
+            mime_type: optimizedFile.type,
+            file_size: optimizedFile.size,
+            width: imageToProcess.width,
+            height: imageToProcess.height,
           })
           .select('id')
           .single();
 
         if (dbError) throw dbError;
         const uploadedImageId = dbRecord.id;
-        // --- FIM DA NOVA LÓGICA ---
 
+        // chama a function
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
         toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
-        // Enviamos o novo ID para a Edge Function
         const { data, error } = await supabase.functions.invoke('process-image', {
           body: { 
             image_path: uploadData.path, 
             processing_type: category, 
             project_id: projectId,
-            uploaded_image_id: uploadedImageId // <-- NOVO PARÂMETRO
+            uploaded_image_id: uploadedImageId
           },
         });
 
@@ -207,7 +362,6 @@ export default function Upload() {
         }
         
         const { data: publicUrlData } = supabase.storage.from('processed-images').getPublicUrl(data.processed_file_path);
-
         const finalProcessedUrl = publicUrlData.publicUrl;
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? ({
@@ -265,10 +419,10 @@ export default function Upload() {
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>1. Selecione suas imagens</CardTitle>
-              <CardDescription>Arraste e solte ou clique para selecionar (máximo 10 imagens)</CardDescription>
+              <CardDescription>Arraste e solte, cole (Ctrl+V), clique para selecionar (máx. 10) ou tire uma foto agora</CardDescription>
             </CardHeader>
             <CardContent>
-              {/* NOVO: botões para câmera/galeria no mobile, sem quebrar o fluxo existente */}
+              {/* câmera (mobile) */}
               <div className="mb-4">
                 <div className="flex items-center gap-3">
                   <Camera className="w-5 h-5 text-zinc-600" />
@@ -278,6 +432,7 @@ export default function Upload() {
               </div>
 
               <div
+                ref={dropRef}
                 className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer"
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
@@ -287,7 +442,7 @@ export default function Upload() {
                 <p className="text-lg font-medium mb-2">
                   {selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s)` : 'Clique ou arraste imagens aqui'}
                 </p>
-                <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB</p>
+                <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB • Dica: também aceita Ctrl+V</p>
                 <input id="file-input" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={handleFileSelect} className="hidden" />
               </div>
 
