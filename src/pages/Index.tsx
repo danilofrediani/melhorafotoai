@@ -82,8 +82,8 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Before/After Section - COM ESTILOS DE 'CONTAIN' */}
-      <section className="py-20 bg-white">
+      {/* Before/After Section - VERSÃO FINAL PROFISSIONAL */}
+      <section className="py-20 bg-slate-50"> {/* Fundo da seção levemente acinzentado */}
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold mb-4">Resultados que Falam por Si</h2>
@@ -91,20 +91,21 @@ export default function Index() {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-6xl mx-auto">
+            
             {/* SLIDER DE ALIMENTOS */}
             <div className="text-center">
-              <h3 className="text-2xl font-semibold mb-4">Alimentos</h3>
-              <div className="rounded-xl overflow-hidden shadow-xl border aspect-w-4 aspect-h-3">
+              <h3 className="text-2xl font-semibold mb-4 text-gray-800">Alimentos</h3>
+              <div className="rounded-xl overflow-hidden shadow-2xl border-4 border-white aspect-[4/3] bg-slate-800">
                 <ReactCompareSlider
                   itemOne={<ReactCompareSliderImage 
                             src="/assets/examples/alimento-antes.jpg" 
                             alt="Alimento Antes" 
-                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }} 
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }} 
                           />}
                   itemTwo={<ReactCompareSliderImage 
                             src="/assets/examples/alimento-depois.jpg" 
                             alt="Alimento Depois" 
-                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                           />}
                 />
               </div>
@@ -112,18 +113,18 @@ export default function Index() {
 
             {/* SLIDER DE PRODUTOS */}
             <div className="text-center">
-              <h3 className="text-2xl font-semibold mb-4">Produtos</h3>
-              <div className="rounded-xl overflow-hidden shadow-xl border aspect-w-4 aspect-h-3">
+              <h3 className="text-2xl font-semibold mb-4 text-gray-800">Produtos</h3>
+              <div className="rounded-xl overflow-hidden shadow-2xl border-4 border-white aspect-[4/3] bg-slate-800">
                 <ReactCompareSlider
                   itemOne={<ReactCompareSliderImage 
                             src="/assets/examples/produto-antes.jpg" 
                             alt="Produto Antes" 
-                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                           />}
                   itemTwo={<ReactCompareSliderImage 
                             src="/assets/examples/produto-depois.jpg" 
                             alt="Produto Depois" 
-                            style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'white' }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                           />}
                 />
               </div>
@@ -133,7 +134,7 @@ export default function Index() {
       </section>
 
       {/* Categories Section */}
-      <section id="categorias" className="py-20 bg-gray-50">
+      <section id="categorias" className="py-20 bg-white">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold mb-4">Categorias Especializadas</h2>
