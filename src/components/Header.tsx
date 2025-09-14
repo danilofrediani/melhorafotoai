@@ -29,11 +29,12 @@ const Header = () => {
   const dashboardRoute = getDashboardRoute(profile?.user_type);
 
   return (
-    <header className="bg-white border-b border-border shadow-sm">
-      <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-        <Link to="/" className="flex items-center space-x-3">
-          <img src="/assets/MelhoraFotoAI_cropped.png" alt="MelhoraFotoAI" className="w-16 h-16 object-contain" />
-          <span className="text-2xl font-bold fotoperfeita-primary">MelhoraFotoAI</span>
+    <header className="bg-white border-b border-border shadow-sm sticky top-0 z-50">
+      <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+        {/* --- LOGO E TÍTULO AJUSTADOS --- */}
+        <Link to="/" className="flex items-center space-x-2 sm:space-x-3">
+          <img src="/assets/MelhoraFotoAI_cropped.png" alt="MelhoraFotoAI" className="w-10 h-10 sm:w-12 sm:h-12 object-contain" />
+          <span className="hidden sm:inline text-xl sm:text-2xl font-bold fotoperfeita-primary">MelhoraFotoAI</span>
         </Link>
 
         <nav className="hidden md:flex items-center space-x-6">
@@ -46,12 +47,12 @@ const Header = () => {
           )}
         </nav>
 
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-2 sm:space-x-4">
           {(isLoadingProfile && user) ? (
             <Loader2 className="w-5 h-5 animate-spin" />
           ) : profile ? (
             <>
-              <div className="hidden md:flex items-center space-x-2 bg-gray-50 px-3 py-2 rounded-full">
+              <div className="hidden md:flex items-center space-x-2 bg-gray-50 px-3 py-2 rounded-full border">
                 <ImageIcon className="w-4 h-4 text-primary" />
                 <span className="text-sm font-medium">{profile?.remaining_images ?? 0} imagens</span>
               </div>
