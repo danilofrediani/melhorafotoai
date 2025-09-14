@@ -1,22 +1,12 @@
 // src/pages/Upload.tsx
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
-import {
-  Upload as UploadIcon,
-  ImageIcon,
-  CheckCircle,
-  AlertCircle,
-  Download,
-  Loader2,
-  X,
-  FolderKanban,
-  Camera
-} from 'lucide-react';
+import { Upload as UploadIcon, ImageIcon, CheckCircle, AlertCircle, Download, Loader2, X, FolderKanban, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -42,13 +32,6 @@ const categories = [
   { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce' }
 ];
 
-// ===== regras de entrada =====
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_FILES = 10;
-// downscale leve para reduzir uso de memória/tempo de upload/processamento
-const DOWNSCALE_MAX_SIDE = 4000; // px (maior lado)
-
 export default function Upload() {
   const { user, profile, refetchProfile } = useAuth();
   const navigate = useNavigate();
@@ -60,7 +43,6 @@ export default function Upload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [category, setCategory] = useState('');
-  const dropRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (user && !profile) { refetchProfile(); }
@@ -79,7 +61,6 @@ export default function Upload() {
 
   const remainingImages = profile?.remaining_images ?? 0;
 
-  // pega dimensões para preview/ratio
   const getFileDimensions = (file: File): Promise<{ width: number; height: number }> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -89,82 +70,43 @@ export default function Upload() {
     });
   };
 
-  // conversão para PNG com rotação EXIF corrigida + downscale opcional
-  const convertToPngKeepSize = async (file: File): Promise<Blob> => {
-    // usa createImageBitmap com imageOrientation (corrige EXIF em navegadores compatíveis)
-    let bitmap: ImageBitmap | null = null;
-    try {
-      const blob = file instanceof Blob ? file : new Blob([file], { type: file.type });
-      bitmap = await createImageBitmap(blob as any, { imageOrientation: 'from-image' as any });
-    } catch {
-      // fallback simples com Image()
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const i = new Image();
-        i.onload = () => resolve(i);
-        i.onerror = () => reject(new Error('Falha ao ler imagem.'));
-        i.src = URL.createObjectURL(file);
-      });
-      const tmp = document.createElement('canvas');
-      tmp.width = img.naturalWidth;
-      tmp.height = img.naturalHeight;
-      const ctx = tmp.getContext('2d');
-      if (!ctx) throw new Error('Canvas não suportado.');
-      ctx.drawImage(img, 0, 0);
-      const b = await new Promise<Blob>((res, rej) => tmp.toBlob((bb) => bb ? res(bb) : rej(new Error('Blob inválido.')), 'image/png'));
-      bitmap = await createImageBitmap(b);
-    }
-
-    // downscale se necessário
-    const { width: w, height: h } = bitmap;
-    const scale = Math.min(1, DOWNSCALE_MAX_SIDE / Math.max(w, h));
-    const outW = Math.max(1, Math.round(w * scale));
-    const outH = Math.max(1, Math.round(h * scale));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = outW;
-    canvas.height = outH;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Não foi possível obter o contexto 2D do canvas.');
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, outW, outH);
-    ctx.drawImage(bitmap, 0, 0, outW, outH);
-
-    return await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Falha ao criar o Blob da imagem.')), 'image/png');
+  const convertToPngKeepSize = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Não foi possível obter o contexto 2D do canvas.'));
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Falha ao criar o Blob da imagem.'));
+        }, 'image/png');
+      };
+      img.onerror = () => reject(new Error('Falha ao carregar a imagem.'));
+      img.src = URL.createObjectURL(file);
     });
   };
 
-  // unifica entrada (drag, input, câmera, paste)
+  // --- helper para unificar entrada de arquivos (drag&drop, input e câmera) ---
   const addFiles = useCallback(async (files: File[]) => {
     if (!files || files.length === 0) return;
 
+    const MAX = 10;
     const current = selectedFiles.length;
-    const available = Math.max(0, MAX_FILES - current);
+    const available = Math.max(0, MAX - current);
     const toAdd = files.slice(0, available);
 
-    if (toAdd.length < files.length) {
-      toast.warning(`Limite de ${MAX_FILES} imagens por vez. Adicionando ${toAdd.length}.`);
+    if (toAdd.length === 0) {
+      toast.error('Limite de 10 imagens por vez.');
+      return;
     }
-    if (toAdd.length === 0) return;
 
-    // validação
-    const valid: File[] = [];
-    for (const f of toAdd) {
-      if (!ACCEPTED_TYPES.includes(f.type)) {
-        toast.error(`Formato não suportado: ${f.name}`);
-        continue;
-      }
-      if (f.size > MAX_FILE_SIZE) {
-        toast.error(`Arquivo muito grande (+10MB): ${f.name}`);
-        continue;
-      }
-      valid.push(f);
-    }
-    if (valid.length === 0) return;
-
-    const withDims = await Promise.all(valid.map(async (file) => {
+    const newWithDims = await Promise.all(toAdd.map(async (file) => {
       const { width, height } = await getFileDimensions(file);
       return {
         id: file.name + Date.now(),
@@ -177,29 +119,26 @@ export default function Upload() {
       };
     }));
 
-    setSelectedFiles(prev => [...prev, ...valid]);
-    setProcessedImages(prev => [...prev, ...withDims]);
+    setSelectedFiles(prev => [...prev, ...toAdd]);
+    setProcessedImages(prev => [...prev, ...newWithDims]);
   }, [category, selectedFiles.length]);
 
-  // input file
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     await addFiles(files);
+    // limpa para permitir nova seleção do mesmo arquivo
     e.currentTarget.value = '';
   }, [addFiles]);
 
-  // câmera
   const handlePickedFromCamera = useCallback(async (file: File) => {
     await addFiles([file]);
   }, [addFiles]);
 
-  // remover
   const handleRemoveFile = useCallback((fileToRemove: File) => {
     setSelectedFiles(prev => prev.filter(f => f !== fileToRemove));
     setProcessedImages(prev => prev.filter(img => img.originalFile !== fileToRemove));
   }, []);
 
-  // drag & drop
   const handleDragOver = useCallback((e: React.DragEvent) => e.preventDefault(), []);
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
@@ -207,27 +146,6 @@ export default function Upload() {
     await addFiles(files);
   }, [addFiles]);
 
-  // paste (Ctrl+V) – cola imagens vindas da área de transferência (prints, etc.)
-  useEffect(() => {
-    const onPaste = async (e: ClipboardEvent) => {
-      if (!e.clipboardData) return;
-      const items = Array.from(e.clipboardData.items);
-      const files: File[] = [];
-      for (const it of items) {
-        if (it.kind === 'file') {
-          const f = it.getAsFile();
-          if (f) files.push(f);
-        }
-      }
-      if (files.length) {
-        await addFiles(files);
-      }
-    };
-    window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
-  }, [addFiles]);
-
-  // processamento
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
     if (selectedFiles.length === 0) return toast.error('Selecione pelo menos uma imagem.');
@@ -240,48 +158,47 @@ export default function Upload() {
       try {
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
         toast.info(`Convertendo "${imageToProcess.originalFile.name}" para PNG...`);
-
         const pngBlob = await convertToPngKeepSize(imageToProcess.originalFile);
         const pngFile = new File([pngBlob], `${uuidv4()}.png`, { type: 'image/png' });
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'uploading' } : img));
         toast.info(`Enviando "${imageToProcess.originalFile.name}"...`);
-
         const fileName = `${user.id}/${pngFile.name}`;
         const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, pngFile);
         if (uploadError) throw uploadError;
 
-        // registra uploaded_image
+        // --- NOVA LÓGICA ADICIONADA AQUI ---
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'registering' } : img));
         toast.info(`Registrando "${imageToProcess.originalFile.name}"...`);
         
         const { data: dbRecord, error: dbError } = await supabase
           .from('uploaded_images')
           .insert({
-            user_id: user.id,
-            file_path: uploadData.path,
-            original_filename: imageToProcess.originalFile.name,
-            mime_type: pngFile.type,
-            file_size: pngFile.size,
-            width: imageToProcess.width,
-            height: imageToProcess.height,
+              user_id: user.id,
+              file_path: uploadData.path,
+              original_filename: imageToProcess.originalFile.name,
+              mime_type: pngFile.type,
+              file_size: pngFile.size,
+              width: imageToProcess.width,
+              height: imageToProcess.height,
           })
           .select('id')
           .single();
 
         if (dbError) throw dbError;
         const uploadedImageId = dbRecord.id;
+        // --- FIM DA NOVA LÓGICA ---
 
-        // chama a edge function (agora com o vínculo)
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
         toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
+        // Enviamos o novo ID para a Edge Function
         const { data, error } = await supabase.functions.invoke('process-image', {
           body: { 
             image_path: uploadData.path, 
             processing_type: category, 
             project_id: projectId,
-            uploaded_image_id: uploadedImageId
+            uploaded_image_id: uploadedImageId // <-- NOVO PARÂMETRO
           },
         });
 
@@ -290,6 +207,7 @@ export default function Upload() {
         }
         
         const { data: publicUrlData } = supabase.storage.from('processed-images').getPublicUrl(data.processed_file_path);
+
         const finalProcessedUrl = publicUrlData.publicUrl;
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? ({
@@ -347,10 +265,10 @@ export default function Upload() {
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>1. Selecione suas imagens</CardTitle>
-              <CardDescription>Arraste e solte, cole (Ctrl+V), clique para selecionar (máx. 10) ou tire uma foto agora</CardDescription>
+              <CardDescription>Arraste e solte ou clique para selecionar (máximo 10 imagens)</CardDescription>
             </CardHeader>
             <CardContent>
-              {/* câmera (mobile) */}
+              {/* NOVO: botões para câmera/galeria no mobile, sem quebrar o fluxo existente */}
               <div className="mb-4">
                 <div className="flex items-center gap-3">
                   <Camera className="w-5 h-5 text-zinc-600" />
@@ -360,7 +278,6 @@ export default function Upload() {
               </div>
 
               <div
-                ref={dropRef}
                 className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer"
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
@@ -370,7 +287,7 @@ export default function Upload() {
                 <p className="text-lg font-medium mb-2">
                   {selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s)` : 'Clique ou arraste imagens aqui'}
                 </p>
-                <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB • Dica: também aceita Ctrl+V</p>
+                <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB</p>
                 <input id="file-input" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={handleFileSelect} className="hidden" />
               </div>
 
