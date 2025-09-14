@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'; // 1. Importar hooks
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,6 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { ArrowRight, Star, Upload, Zap, Shield, CheckCircle } from 'lucide-react';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
+import { supabase } from '@/lib/supabase'; // 2. Importar o Supabase client
 
 const categories = [
   {
@@ -46,6 +48,33 @@ const steps = [
 ];
 
 export default function Index() {
+  // 3. Criar estado para armazenar o número de imagens grátis
+  const [freeImagesCount, setFreeImagesCount] = useState<number>(2); // Inicia com um valor padrão
+
+  // 4. Buscar o valor real do banco de dados quando o componente carregar
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('platform_settings')
+          .select('free_images_for_new_users')
+          .eq('id', 1)
+          .single();
+
+        if (error) throw error;
+        
+        if (data && data.free_images_for_new_users) {
+          setFreeImagesCount(data.free_images_for_new_users);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar configurações de imagens grátis:", error);
+        // Em caso de erro, o valor padrão (2) será mantido.
+      }
+    };
+
+    fetchSettings();
+  }, []);
+
   return (
     <div className="min-h-screen bg-white">
       <Header />
@@ -76,14 +105,15 @@ export default function Index() {
               <Link to="/pricing">Ver Preços</Link>
             </Button>
           </div>
+          {/* 5. Exibir o valor dinâmico */}
           <p className="text-sm text-gray-500 mt-4">
-            ✨ 2 imagens grátis para novos usuários
+            ✨ {freeImagesCount} imagens grátis para novos usuários
           </p>
         </div>
       </section>
 
-      {/* Before/After Section - VERSÃO FINAL PROFISSIONAL */}
-      <section className="py-20 bg-slate-50"> {/* Fundo da seção levemente acinzentado */}
+      {/* Before/After Section */}
+      <section className="py-20 bg-slate-50">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold mb-4">Resultados que Falam por Si</h2>
@@ -91,8 +121,6 @@ export default function Index() {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-6xl mx-auto">
-            
-            {/* SLIDER DE ALIMENTOS */}
             <div className="text-center">
               <h3 className="text-2xl font-semibold mb-4 text-gray-800">Alimentos</h3>
               <div className="rounded-xl overflow-hidden shadow-2xl border-4 border-white aspect-[4/3] bg-slate-800">
@@ -110,8 +138,6 @@ export default function Index() {
                 />
               </div>
             </div>
-
-            {/* SLIDER DE PRODUTOS */}
             <div className="text-center">
               <h3 className="text-2xl font-semibold mb-4 text-gray-800">Produtos</h3>
               <div className="rounded-xl overflow-hidden shadow-2xl border-4 border-white aspect-[4/3] bg-slate-800">
@@ -218,8 +244,9 @@ export default function Index() {
       <section className="py-20 bg-gradient-fotoperfeita text-white">
         <div className="container mx-auto px-4 text-center">
           <h2 className="text-4xl font-bold mb-4">Pronto para transformar suas fotos?</h2>
+          {/* 5. Exibir o valor dinâmico */}
           <p className="text-xl mb-8 opacity-90">
-            Teste gratuitamente com 2 imagens
+            Teste gratuitamente com {freeImagesCount} imagens
           </p>
           <Button size="lg" className="bg-white text-primary hover:bg-gray-100" asChild>
             <Link to="/register">

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // 1. useEffect adicionado
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, Gift } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase'; // 2. Importar o Supabase client
 
 export default function Register() {
   const [name, setName] = useState('');
@@ -17,6 +18,31 @@ export default function Register() {
   const [error, setError] = useState('');
   const { register, loading } = useAuth();
   const navigate = useNavigate();
+
+  // 3. Criar estado para armazenar o número de imagens grátis
+  const [freeImagesCount, setFreeImagesCount] = useState<number>(3); // Inicia com 3 para consistência
+
+  // 4. Buscar o valor real do banco de dados
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('platform_settings')
+          .select('free_images_for_new_users')
+          .eq('id', 1)
+          .single();
+
+        if (error) throw error;
+        
+        if (data && data.free_images_for_new_users) {
+          setFreeImagesCount(data.free_images_for_new_users);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar configurações de imagens grátis:", error);
+      }
+    };
+    fetchSettings();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,7 +61,6 @@ export default function Register() {
       return;
     }
 
-    // Lógica ajustada: Todo novo usuário é 'basic' por padrão.
     const result = await register(email, password, name, 'basic');
     
     if (result.success) {
@@ -67,10 +92,11 @@ export default function Register() {
         <Card>
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Criar sua conta</CardTitle>
-            <CardDescription>Cadastre-se gratuitamente e ganhe 3 imagens para testar</CardDescription>
+            {/* 5. Exibir o valor dinâmico */}
+            <CardDescription>Cadastre-se gratuitamente e ganhe {freeImagesCount} imagens para testar</CardDescription>
             <div className="flex items-center justify-center mt-2 text-sm text-green-600 font-medium">
               <Gift className="w-4 h-4 mr-1" />
-              3 imagens grátis para novos usuários
+              {freeImagesCount} imagens grátis para novos usuários
             </div>
           </CardHeader>
           <CardContent>
