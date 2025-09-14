@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { ArrowRight, Star, Upload, Zap, Shield, CheckCircle } from 'lucide-react';
-// 1. IMPORTAR OS COMPONENTES DO SLIDER
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 const categories = [
@@ -83,7 +82,7 @@ export default function Index() {
         </div>
       </section>
 
-      {/* Before/After Section - ATUALIZADA COM SLIDERS */}
+      {/* Before/After Section - COM ESTILOS CORRIGIDOS */}
       <section className="py-20 bg-white">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
@@ -96,13 +95,17 @@ export default function Index() {
             <div className="text-center">
               <h3 className="text-2xl font-semibold mb-4">Alimentos</h3>
               <div className="rounded-xl overflow-hidden shadow-xl border aspect-square">
-                {/* // TODO: SUBSTITUA PELAS SUAS IMAGENS
-                  // Coloque suas imagens na pasta /public/assets/examples/
-                  // Exemplo: /public/assets/examples/alimento-antes.jpg
-                */}
                 <ReactCompareSlider
-                  itemOne={<ReactCompareSliderImage src="/assets/examples/alimento-antes.jpg" alt="Alimento Antes" />}
-                  itemTwo={<ReactCompareSliderImage src="/assets/examples/alimento-depois.jpg" alt="Alimento Depois" />}
+                  itemOne={<ReactCompareSliderImage 
+                            src="/assets/examples/alimento-antes.jpg" 
+                            alt="Alimento Antes" 
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                          />}
+                  itemTwo={<ReactCompareSliderImage 
+                            src="/assets/examples/alimento-depois.jpg" 
+                            alt="Alimento Depois" 
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />}
                 />
               </div>
             </div>
@@ -111,13 +114,17 @@ export default function Index() {
             <div className="text-center">
               <h3 className="text-2xl font-semibold mb-4">Produtos</h3>
               <div className="rounded-xl overflow-hidden shadow-xl border aspect-square">
-                {/* // TODO: SUBSTITUA PELAS SUAS IMAGENS
-                  // Coloque suas imagens na pasta /public/assets/examples/
-                  // Exemplo: /public/assets/examples/produto-antes.jpg
-                */}
                 <ReactCompareSlider
-                  itemOne={<ReactCompareSliderImage src="/assets/examples/produto-antes.jpg" alt="Produto Antes" />}
-                  itemTwo={<ReactCompareSliderImage src="/assets/examples/produto-depois.jpg" alt="Produto Depois" />}
+                  itemOne={<ReactCompareSliderImage 
+                            src="/assets/examples/produto-antes.jpg" 
+                            alt="Produto Antes" 
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />}
+                  itemTwo={<ReactCompareSliderImage 
+                            src="/assets/examples/produto-depois.jpg" 
+                            alt="Produto Depois" 
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />}
                 />
               </div>
             </div>
