@@ -6,13 +6,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Header from '@/components/Header';
-import { Upload as UploadIcon, ImageIcon, CheckCircle, AlertCircle, Download, Loader2, X, FolderKanban } from 'lucide-react';
+import { Upload as UploadIcon, ImageIcon, CheckCircle, AlertCircle, Download, Loader2, X, FolderKanban, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { projectService } from '@/lib/database';
 import { v4 as uuidv4 } from 'uuid';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
+import CameraPicker from '@/components/CameraPicker';
 
 interface ProcessResult {
   id: string;
@@ -91,11 +92,21 @@ export default function Upload() {
     });
   };
 
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).slice(0, 10);
-    setSelectedFiles(files);
+  // --- helper para unificar entrada de arquivos (drag&drop, input e câmera) ---
+  const addFiles = useCallback(async (files: File[]) => {
+    if (!files || files.length === 0) return;
 
-    const withDims = await Promise.all(files.map(async (file) => {
+    const MAX = 10;
+    const current = selectedFiles.length;
+    const available = Math.max(0, MAX - current);
+    const toAdd = files.slice(0, available);
+
+    if (toAdd.length === 0) {
+      toast.error('Limite de 10 imagens por vez.');
+      return;
+    }
+
+    const newWithDims = await Promise.all(toAdd.map(async (file) => {
       const { width, height } = await getFileDimensions(file);
       return {
         id: file.name + Date.now(),
@@ -107,8 +118,21 @@ export default function Upload() {
         status: 'pending' as const
       };
     }));
-    setProcessedImages(withDims);
-  }, [category]);
+
+    setSelectedFiles(prev => [...prev, ...toAdd]);
+    setProcessedImages(prev => [...prev, ...newWithDims]);
+  }, [category, selectedFiles.length]);
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    await addFiles(files);
+    // limpa para permitir nova seleção do mesmo arquivo
+    e.currentTarget.value = '';
+  }, [addFiles]);
+
+  const handlePickedFromCamera = useCallback(async (file: File) => {
+    await addFiles([file]);
+  }, [addFiles]);
 
   const handleRemoveFile = useCallback((fileToRemove: File) => {
     setSelectedFiles(prev => prev.filter(f => f !== fileToRemove));
@@ -118,23 +142,9 @@ export default function Upload() {
   const handleDragOver = useCallback((e: React.DragEvent) => e.preventDefault(), []);
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).slice(0, 10);
-    setSelectedFiles(files);
-
-    const withDims = await Promise.all(files.map(async (file) => {
-      const { width, height } = await getFileDimensions(file);
-      return {
-        id: file.name + Date.now(),
-        originalFile: file,
-        originalUrl: URL.createObjectURL(file),
-        width,
-        height,
-        category,
-        status: 'pending' as const
-      };
-    }));
-    setProcessedImages(withDims);
-  }, [category]);
+    const files = Array.from(e.dataTransfer.files);
+    await addFiles(files);
+  }, [addFiles]);
 
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
@@ -258,6 +268,15 @@ export default function Upload() {
               <CardDescription>Arraste e solte ou clique para selecionar (máximo 10 imagens)</CardDescription>
             </CardHeader>
             <CardContent>
+              {/* NOVO: botões para câmera/galeria no mobile, sem quebrar o fluxo existente */}
+              <div className="mb-4">
+                <div className="flex items-center gap-3">
+                  <Camera className="w-5 h-5 text-zinc-600" />
+                  <span className="text-sm text-zinc-600">No celular, você pode tirar a foto agora:</span>
+                </div>
+                <CameraPicker onPick={handlePickedFromCamera} className="mt-2" />
+              </div>
+
               <div
                 className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer"
                 onDragOver={handleDragOver}
@@ -385,3 +404,4 @@ export default function Upload() {
     </div>
   );
 }
+
