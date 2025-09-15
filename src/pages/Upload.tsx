@@ -42,14 +42,11 @@ const categories = [
   { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce' }
 ];
 
-// ===== Regras de entrada =====
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024;    // 10MB (entrada)
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES = 10;
-
-// ===== Preset B (Aprovado) =====
-const PRESET_MAX_SIDE = 2048;              // px (maior lado)
-const TARGET_MAX_BYTES = 7.5 * 1024 * 1024; // 7.5MB alvo final
+const PRESET_MAX_SIDE = 2048;
+const TARGET_MAX_BYTES = 7.5 * 1024 * 1024;
 
 export default function Upload() {
   const { user, profile, refetchProfile } = useAuth();
@@ -90,9 +87,6 @@ export default function Upload() {
     });
   };
 
-  // ===== Utils de imagem (frontend) =====
-
-  // detecta se imagem tem transparência (amostragem em grade para performance)
   const hasAlpha = async (bitmap: ImageBitmap): Promise<boolean> => {
     const sampleW = 64;
     const sampleH = Math.round((bitmap.height / bitmap.width) * sampleW) || 64;
@@ -109,13 +103,11 @@ export default function Upload() {
     return false;
   };
 
-  // redimensiona mantendo orientação EXIF
   const makeBitmap = async (file: File): Promise<ImageBitmap> => {
     try {
       const blob = file instanceof Blob ? file : new Blob([file], { type: file.type });
       return await createImageBitmap(blob as any, { imageOrientation: 'from-image' as any });
     } catch {
-      // fallback simples
       const img = await new Promise<HTMLImageElement>((resolve, reject) => {
         const i = new Image();
         i.onload = () => resolve(i);
@@ -133,7 +125,6 @@ export default function Upload() {
     }
   };
 
-  // renderiza para canvas com downscale
   const renderToCanvas = (bitmap: ImageBitmap, maxSide: number): HTMLCanvasElement => {
     const { width: w, height: h } = bitmap;
     const scale = Math.min(1, maxSide / Math.max(w, h));
@@ -149,14 +140,8 @@ export default function Upload() {
     return canvas;
   };
 
-  // exporta com qualidade adaptativa (JPEG) / PNG se alpha
-  const exportAdaptive = async (
-    canvas: HTMLCanvasElement,
-    wantAlpha: boolean,
-    targetBytes: number
-  ): Promise<Blob> => {
+  const exportAdaptive = async (canvas: HTMLCanvasElement, wantAlpha: boolean, targetBytes: number): Promise<Blob> => {
     if (wantAlpha) {
-      // PNG não tem "qualidade", então controlamos pelo tamanho (dimensão)
       let current = canvas;
       let blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/png'));
       if (!blob) throw new Error('Falha ao exportar PNG.');
@@ -178,13 +163,11 @@ export default function Upload() {
       let current = canvas;
       let blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/jpeg', q));
       if (!blob) throw new Error('Falha ao exportar JPEG.');
-      // primeiro tenta reduzir qualidade
       while (blob.size > targetBytes && q > 0.6) {
         q = Math.max(0.6, q - 0.1);
         blob = await new Promise<Blob | null>(res => current.toBlob(res, 'image/jpeg', q));
         if (!blob) throw new Error('Falha ao exportar JPEG.');
       }
-      // se ainda grande, reduz dimensão
       while (blob.size > targetBytes && (current.width > 512 || current.height > 512)) {
         const next = document.createElement('canvas');
         next.width = Math.round(current.width * 0.9);
@@ -201,7 +184,6 @@ export default function Upload() {
     }
   };
 
-  // ===== Conversão final para atender a Fal.ai (Preset B) =====
   const convertForFalAI = async (file: File): Promise<{ blob: Blob; mime: string }> => {
     const bitmap = await makeBitmap(file);
     const alpha = await hasAlpha(bitmap);
@@ -211,10 +193,8 @@ export default function Upload() {
     return { blob, mime };
   };
 
-  // ===== Entrada de arquivos (drag/input/câmera/paste) =====
   const addFiles = useCallback(async (files: File[]) => {
     if (!files || files.length === 0) return;
-
     const current = selectedFiles.length;
     const available = Math.max(0, MAX_FILES - current);
     const toAdd = files.slice(0, available);
@@ -231,7 +211,6 @@ export default function Upload() {
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
-        // ainda aceitamos e trataremos na conversão; apenas aviso
         toast.warning(`Arquivo grande (>10MB): ${f.name}. Vamos otimizar antes do envio.`);
       }
       valid.push(f);
@@ -250,7 +229,6 @@ export default function Upload() {
         status: 'pending' as const
       };
     }));
-
     setSelectedFiles(prev => [...prev, ...valid]);
     setProcessedImages(prev => [...prev, ...withDims]);
   }, [category, selectedFiles.length]);
@@ -277,7 +255,6 @@ export default function Upload() {
     await addFiles(files);
   }, [addFiles]);
 
-  // Ctrl+V
   useEffect(() => {
     const onPaste = async (e: ClipboardEvent) => {
       if (!e.clipboardData) return;
@@ -297,7 +274,6 @@ export default function Upload() {
     return () => window.removeEventListener('paste', onPaste);
   }, [addFiles]);
 
-  // ===== Processamento (upload + invoke) =====
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
     if (selectedFiles.length === 0) return toast.error('Selecione pelo menos uma imagem.');
@@ -311,7 +287,6 @@ export default function Upload() {
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
         toast.info(`Otimizando "${imageToProcess.originalFile.name}" para a IA...`);
 
-        // >>> NOVO: Converter para atender limite da Fal.ai (Preset B)
         const { blob: finalBlob, mime } = await convertForFalAI(imageToProcess.originalFile);
         const ext = mime === 'image/png' ? 'png' : 'jpg';
         const optimizedFile = new File([finalBlob], `${uuidv4()}.${ext}`, { type: mime });
@@ -323,7 +298,6 @@ export default function Upload() {
         const { data: uploadData, error: uploadError } = await supabase.storage.from('uploaded-images').upload(fileName, optimizedFile);
         if (uploadError) throw uploadError;
 
-        // registra uploaded_image (mantém dimensões originais salvas, como antes)
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'registering' } : img));
         toast.info(`Registrando "${imageToProcess.originalFile.name}"...`);
         
@@ -340,11 +314,9 @@ export default function Upload() {
           })
           .select('id')
           .single();
-
         if (dbError) throw dbError;
         const uploadedImageId = dbRecord.id;
 
-        // chama a function
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'processing' } : img));
         toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
@@ -378,9 +350,16 @@ export default function Upload() {
           toast.error(`Falha no processamento de "${imageToProcess.originalFile.name}".`);
         }
 
-      } catch (err) {
-        setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'error', error: (err as Error).message } : img));
-        toast.error(`Falha no processamento de "${imageToProcess.originalFile.name}"`);
+      } catch (err: any) { // MODIFICADO PARA CAPTURAR O ERRO DETALHADO
+        const errorMessage = err.message || JSON.stringify(err);
+        console.error("ERRO DETALHADO NO PROCESSAMENTO:", err);
+        setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'error', error: errorMessage } : img));
+        
+        // O TOAST AGORA MOSTRA O ERRO TÉCNICO COMPLETO
+        toast.error(`Falha em "${imageToProcess.originalFile.name}": ${errorMessage}`, {
+          duration: 10000, // Aumenta a duração para dar tempo de ler
+        });
+
         setIsProcessing(false);
         return;
       }
@@ -422,7 +401,6 @@ export default function Upload() {
               <CardDescription>Arraste e solte, cole (Ctrl+V), clique para selecionar (máx. 10) ou tire uma foto agora</CardDescription>
             </CardHeader>
             <CardContent>
-              {/* câmera (mobile) */}
               <div className="mb-4">
                 <div className="flex items-center gap-3">
                   <Camera className="w-5 h-5 text-zinc-600" />
@@ -559,4 +537,3 @@ export default function Upload() {
     </div>
   );
 }
-
