@@ -19,28 +19,58 @@ import Pricing from './pages/Pricing';
 import NotFound from './pages/NotFound';
 import ProtectedRoute from './components/ProtectedRoute';
 import ProjectView from './pages/ProjectView';
-import Terms from './pages/Terms'; 
+import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import Faq from './pages/Faq';
 
 const queryClient = new QueryClient();
 
-// --- NOVO COMPONENTE DE RASTREAMENTO ---
-// Este componente "ouve" as mudanças de URL e envia para o Analytics.
+// --- COMPONENTE DE RASTREAMENTO GA ---
 const RouteTracker = () => {
   const location = useLocation();
-
   useEffect(() => {
-    // Só envia eventos em ambiente de produção
     if (import.meta.env.PROD) {
       ReactGA.send({ hitType: "pageview", page: location.pathname + location.search });
-      console.log(`GA Pageview: ${location.pathname + location.search}`); // Log para debug
     }
   }, [location]);
-
-  return null; // Este componente não renderiza nada na tela.
+  return null;
 };
-// --- FIM DO NOVO COMPONENTE ---
+
+// --- NOVO COMPONENTE DE TESTE SENTRY ---
+// Este botão só aparecerá em produção e servirá para gerar um erro de teste.
+const SentryTestButton = () => {
+  // Se não estivermos em produção, o botão não renderiza nada.
+  if (!import.meta.env.PROD) {
+    return null;
+  }
+
+  const triggerError = () => {
+    throw new Error(`Sentry Production Test - MelhoraFotoAI - ${new Date().toISOString()}`);
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    position: 'fixed',
+    bottom: '20px',
+    right: '20px',
+    zIndex: 9999,
+    backgroundColor: '#ef4444', // red-500
+    color: 'white',
+    padding: '10px 20px',
+    borderRadius: '8px',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '14px',
+    boxShadow: '0 4px 14px 0 rgba(0,0,0,0.25)',
+  };
+
+  return (
+    <button style={buttonStyle} onClick={triggerError}>
+      Testar Sentry
+    </button>
+  );
+};
+// --- FIM DO COMPONENTE DE TESTE SENTRY ---
+
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -49,7 +79,8 @@ const App = () => (
         <PackageProvider>
           <Toaster />
           <BrowserRouter>
-            <RouteTracker /> {/* <-- Componente de rastreamento adicionado aqui */}
+            <RouteTracker />
+            <SentryTestButton /> {/* <-- Botão de teste adicionado aqui */}
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
