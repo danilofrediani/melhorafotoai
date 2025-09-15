@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 
-// --- Tipos para a Digital Goods API ---
-// Estes tipos nos ajudam a ter autocomplete e segurança no código
+// --- Tipos para a Digital Goods API (sem alteração) ---
 interface DigitalGoodsService {
   getDetails(skus: string[]): Promise<PaymentItemDetails[]>;
   purchase(details: PurchaseDetails): Promise<PurchaseResponse>;
   consume(purchaseToken: string): Promise<void>;
   listPurchases(): Promise<PurchaseDetails[]>;
 }
-
 interface PaymentItemDetails {
   itemId: string;
   title: string;
@@ -18,17 +16,13 @@ interface PaymentItemDetails {
     value: string;
   };
 }
-
 interface PurchaseDetails {
   itemId: string;
   purchaseToken: string;
 }
-
 interface PurchaseResponse {
   purchaseToken: string;
 }
-
-// Declaração para o TypeScript saber que "getDigitalGoodsService" existe no window
 declare global {
   interface Window {
     getDigitalGoodsService?: (serviceId: string) => Promise<DigitalGoodsService | null>;
@@ -43,33 +37,50 @@ const usePlayBilling = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Efeito para inicializar o serviço quando o hook é usado
+  // --- LÓGICA DE INICIALIZAÇÃO MODIFICADA (MAIS PACIENTE) ---
   useEffect(() => {
-    const initializeService = async () => {
-      try {
-        if (window.getDigitalGoodsService) {
+    // Tenta encontrar o serviço por 3 segundos antes de desistir.
+    const maxRetries = 30; // 30 tentativas
+    const retryDelay = 100; // a cada 100ms
+    let attempt = 0;
+
+    const intervalId = setInterval(async () => {
+      attempt++;
+      console.log(`Tentativa ${attempt} de encontrar o serviço de pagamento...`);
+
+      if (window.getDigitalGoodsService) {
+        clearInterval(intervalId); // Para de tentar assim que encontra
+        console.log("Serviço encontrado! Inicializando...");
+        try {
           const service = await window.getDigitalGoodsService("https://play.google.com/billing");
           if (service) {
             setPlayStoreService(service);
           } else {
-            // Isso acontece se o usuário não estiver no TWA (app Android)
             setError("Serviço de pagamento do Google Play não disponível.");
           }
-        } else {
-          setError("API de Bens Digitais não encontrada. Acesso via web?");
+        } catch (e) {
+          console.error("Erro ao inicializar o serviço de pagamento:", e);
+          setError("Falha ao conectar com o serviço de pagamento.");
+        } finally {
+          setIsLoading(false);
         }
-      } catch (e) {
-        console.error("Erro ao inicializar o serviço de pagamento:", e);
-        setError("Falha ao conectar com o serviço de pagamento.");
-      } finally {
+        return;
+      }
+      
+      if (attempt >= maxRetries) {
+        clearInterval(intervalId); // Desiste após 3 segundos
+        console.log("Serviço não encontrado após 3 segundos. Assumindo modo web.");
+        setError("API de Bens Digitais não encontrada. Acesso via web?");
         setIsLoading(false);
       }
-    };
+    }, retryDelay);
 
-    initializeService();
+    // Limpa o intervalo se o componente for desmontado
+    return () => clearInterval(intervalId);
   }, []);
+  // --- FIM DA LÓGICA MODIFICADA ---
 
-  // Função para carregar os detalhes dos produtos que criamos no Play Console
+
   const loadProducts = useCallback(async (skus: string[]) => {
     if (!playStoreService) {
       console.log("Serviço não está pronto para carregar produtos.");
@@ -86,26 +97,17 @@ const usePlayBilling = () => {
     }
   }, [playStoreService]);
   
-  // Função para iniciar o fluxo de compra
   const purchase = async (sku: string) => {
     if (!playStoreService) {
       throw new Error("Serviço de pagamento não inicializado.");
     }
     try {
       console.log("Iniciando compra para o SKU:", sku);
-      // Aqui, a Digital Goods API chama a tela de pagamento do Google
       const result = await playStoreService.purchase({ itemId: sku });
       console.log("Compra realizada, token:", result.purchaseToken);
-      
-      // IMPORTANTE: Após a compra, precisamos validar este token no nosso back-end
-      // e então "consumir" o produto para que ele possa ser comprado novamente.
-      
-      // Por enquanto, vamos apenas retornar o token
       return result.purchaseToken;
-
     } catch (e) {
       console.error("Erro durante a compra:", e);
-      // O erro pode ser 'AbortError' se o usuário cancelar, o que é normal.
       if ((e as Error).name !== 'AbortError') {
         setError("Ocorreu um erro durante a compra.");
       }
