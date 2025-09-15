@@ -1,10 +1,11 @@
+import { useEffect } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PackageProvider } from '@/contexts/PackageContext';
-
+import ReactGA from 'react-ga4';
 
 // Pages
 import Index from './pages/Index';
@@ -24,7 +25,23 @@ import Faq from './pages/Faq';
 
 const queryClient = new QueryClient();
 
-// Removemos a verificação de 'loading' e o componente AppRoutes
+// --- NOVO COMPONENTE DE RASTREAMENTO ---
+// Este componente "ouve" as mudanças de URL e envia para o Analytics.
+const RouteTracker = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Só envia eventos em ambiente de produção
+    if (import.meta.env.PROD) {
+      ReactGA.send({ hitType: "pageview", page: location.pathname + location.search });
+      console.log(`GA Pageview: ${location.pathname + location.search}`); // Log para debug
+    }
+  }, [location]);
+
+  return null; // Este componente não renderiza nada na tela.
+};
+// --- FIM DO NOVO COMPONENTE ---
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -32,6 +49,7 @@ const App = () => (
         <PackageProvider>
           <Toaster />
           <BrowserRouter>
+            <RouteTracker /> {/* <-- Componente de rastreamento adicionado aqui */}
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
