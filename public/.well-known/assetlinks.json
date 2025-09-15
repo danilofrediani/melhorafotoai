@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "br.com.melhorafotoai.twa",
+    "sha256_cert_fingerprints": [
+      "42:C7:D5:92:4E:73:0D:CF:F4:25:BD:D4:9F:C9:B4:EA:8F:40:03:A5:6D:CD:F9:96:90:D2:81:EA:F5:4F:BE:2A"
+    ]
+  }
+}]
