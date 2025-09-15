@@ -206,7 +206,7 @@ export default function Upload() {
 
     const valid: File[] = [];
     for (const f of toAdd) {
-      if (!f.type.startsWith('image/')) { // Validação mais flexível
+      if (!f.type.startsWith('image/')) {
         toast.error(`Arquivo não parece ser uma imagem: ${f.name}`);
         continue;
       }
@@ -276,17 +276,14 @@ export default function Upload() {
 
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
-    if (selectedFiles.length === 0) return toast.error('Selecione pelo menos uma imagem.');
+    const pendingImages = processedImages.filter(p => p.status === 'pending');
+    if (pendingImages.length === 0) return toast.info('Nenhuma nova imagem para processar.');
     if (!user) return toast.error('Você precisa estar logado.');
-    if (processedImages.filter(p => p.status === 'pending').length > remainingImages) {
-        return toast.error(`Você só tem ${remainingImages} créditos restantes.`);
-    }
+    if (pendingImages.length > remainingImages) return toast.error(`Você precisa de ${pendingImages.length} créditos, mas só tem ${remainingImages}.`);
 
     setIsProcessing(true);
 
     for (const imageToProcess of processedImages) {
-      // ===== A CORREÇÃO ESTÁ AQUI =====
-      // Pula qualquer imagem que não esteja no estado 'pending'
       if (imageToProcess.status !== 'pending') {
         continue;
       }
@@ -378,13 +375,16 @@ export default function Upload() {
     setProcessedImages([]);
   }
 
-  // O resto do seu return (JSX) permanece o mesmo
+  // Lógica para o botão de processar
+  const pendingImagesCount = processedImages.filter(p => p.status === 'pending').length;
+  const hasCompletedImages = processedImages.some(p => p.status === 'completed' || p.status === 'error');
+  const isDoneProcessing = !isProcessing && hasCompletedImages;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          {/* ... seu JSX do cabeçalho da página ... */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Upload de Imagens</h1>
             <p className="text-gray-600">Faça upload das suas imagens e veja a magia da nossa IA acontecer</p>
@@ -401,15 +401,13 @@ export default function Upload() {
                 <ImageIcon className="w-4 h-4 text-primary" />
                 <span className="text-sm font-medium">{profile?.remaining_images ?? 0} imagens restantes</span>
               </div>
-              {(profile?.remaining_images ?? 0) < selectedFiles.length && (
+              {(profile?.remaining_images ?? 0) < pendingImagesCount && (
                 <Button size="sm" onClick={() => navigate('/pricing')}>Comprar mais créditos</Button>
               )}
             </div>
           </div>
 
-
-          {/* Card de Upload */}
-          {!isProcessing && processedImages.filter(p => p.status === 'completed' || p.status === 'error').length === processedImages.length && processedImages.length > 0 ? (
+          {isDoneProcessing && pendingImagesCount === 0 ? (
              <Card className="mb-8 text-center">
                <CardHeader><CardTitle>Processamento Concluído</CardTitle></CardHeader>
                <CardContent>
@@ -443,7 +441,7 @@ export default function Upload() {
                   <p className="text-lg font-medium mb-2">
                     {selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s)` : 'Clique ou arraste imagens aqui'}
                   </p>
-                  <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB • Dica: também aceita Ctrl+V</p>
+                  <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP • Dica: também aceita Ctrl+V</p>
                   <input id="file-input" type="file" multiple accept="image/*" className="hidden" />
                 </div>
 
@@ -473,7 +471,6 @@ export default function Upload() {
             </Card>
           )}
 
-          {/* Card de Categoria */}
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>2. Escolha a categoria</CardTitle>
@@ -495,16 +492,17 @@ export default function Upload() {
               </Select>
             </CardContent>
           </Card>
-
-          {/* Botão de Processar */}
+          
           <div className="mb-8">
-            <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || selectedFiles.length === 0 || !category}>
-              {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> : ''} 
-              {isProcessing ? 'Processando...' : `Processar ${processedImages.filter(p => p.status === 'pending').length} Novas Imagens`}
+            <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || pendingImagesCount === 0 || !category}>
+              {isProcessing ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processando...</>
+              ) : (
+                `Processar ${pendingImagesCount} Novas Imagens`
+              )}
             </Button>
           </div>
 
-          {/* Resultados */}
           {processedImages.length > 0 && (
             <Card>
               <CardHeader><CardTitle>Resultados</CardTitle></CardHeader>
@@ -522,7 +520,6 @@ export default function Upload() {
                           {image.status === 'error' && <><AlertCircle className="h-4 w-4 text-red-500" /><span className="text-sm text-red-500">Erro</span></>}
                         </div>
                       </div>
-
                       <div
                         className="w-full bg-gray-100 rounded-lg border overflow-hidden"
                         style={{ aspectRatio: `${image.width} / ${image.height}` }}
