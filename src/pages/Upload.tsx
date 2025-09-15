@@ -206,8 +206,8 @@ export default function Upload() {
 
     const valid: File[] = [];
     for (const f of toAdd) {
-      if (!ACCEPTED_TYPES.includes(f.type)) {
-        toast.error(`Formato não suportado: ${f.name}`);
+      if (!f.type.startsWith('image/')) { // Validação mais flexível
+        toast.error(`Arquivo não parece ser uma imagem: ${f.name}`);
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
@@ -278,11 +278,19 @@ export default function Upload() {
     if (!category) return toast.error('Selecione uma categoria.');
     if (selectedFiles.length === 0) return toast.error('Selecione pelo menos uma imagem.');
     if (!user) return toast.error('Você precisa estar logado.');
-    if (selectedFiles.length > remainingImages) return toast.error(`Você só tem ${remainingImages} créditos restantes.`);
+    if (processedImages.filter(p => p.status === 'pending').length > remainingImages) {
+        return toast.error(`Você só tem ${remainingImages} créditos restantes.`);
+    }
 
     setIsProcessing(true);
 
     for (const imageToProcess of processedImages) {
+      // ===== A CORREÇÃO ESTÁ AQUI =====
+      // Pula qualquer imagem que não esteja no estado 'pending'
+      if (imageToProcess.status !== 'pending') {
+        continue;
+      }
+
       try {
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
         toast.info(`Otimizando "${imageToProcess.originalFile.name}" para a IA...`);
@@ -350,29 +358,33 @@ export default function Upload() {
           toast.error(`Falha no processamento de "${imageToProcess.originalFile.name}".`);
         }
 
-      } catch (err: any) { // MODIFICADO PARA CAPTURAR O ERRO DETALHADO
+      } catch (err: any) {
         const errorMessage = err.message || JSON.stringify(err);
         console.error("ERRO DETALHADO NO PROCESSAMENTO:", err);
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'error', error: errorMessage } : img));
-        
-        // O TOAST AGORA MOSTRA O ERRO TÉCNICO COMPLETO
         toast.error(`Falha em "${imageToProcess.originalFile.name}": ${errorMessage}`, {
-          duration: 10000, // Aumenta a duração para dar tempo de ler
+          duration: 10000,
         });
-
-        setIsProcessing(false);
-        return;
+        // Não para o processo inteiro, apenas continua para o próximo
+        continue;
       }
     }
 
     setIsProcessing(false);
   };
+  
+  const clearProcessed = () => {
+    setSelectedFiles([]);
+    setProcessedImages([]);
+  }
 
+  // O resto do seu return (JSX) permanece o mesmo
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
+          {/* ... seu JSX do cabeçalho da página ... */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Upload de Imagens</h1>
             <p className="text-gray-600">Faça upload das suas imagens e veja a magia da nossa IA acontecer</p>
@@ -395,60 +407,73 @@ export default function Upload() {
             </div>
           </div>
 
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle>1. Selecione suas imagens</CardTitle>
-              <CardDescription>Arraste e solte, cole (Ctrl+V), clique para selecionar (máx. 10) ou tire uma foto agora</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4">
-                <div className="flex items-center gap-3">
-                  <Camera className="w-5 h-5 text-zinc-600" />
-                  <span className="text-sm text-zinc-600">No celular, você pode tirar a foto agora:</span>
+
+          {/* Card de Upload */}
+          {!isProcessing && processedImages.filter(p => p.status === 'completed' || p.status === 'error').length === processedImages.length && processedImages.length > 0 ? (
+             <Card className="mb-8 text-center">
+               <CardHeader><CardTitle>Processamento Concluído</CardTitle></CardHeader>
+               <CardContent>
+                 <p className="mb-4">Seu lote de imagens foi processado. Você pode baixar os resultados abaixo ou iniciar um novo envio.</p>
+                 <Button onClick={clearProcessed}><UploadIcon className="mr-2 h-4 w-4" /> Enviar Novas Imagens</Button>
+               </CardContent>
+             </Card>
+          ) : (
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle>1. Selecione suas imagens</CardTitle>
+                <CardDescription>Arraste e solte, cole (Ctrl+V), clique para selecionar (máx. 10) ou tire uma foto agora</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-4">
+                  <div className="flex items-center gap-3">
+                    <Camera className="w-5 h-5 text-zinc-600" />
+                    <span className="text-sm text-zinc-600">No celular, você pode tirar a foto agora:</span>
+                  </div>
+                  <CameraPicker onPick={handlePickedFromCamera} className="mt-2" />
                 </div>
-                <CameraPicker onPick={handlePickedFromCamera} className="mt-2" />
-              </div>
 
-              <div
-                ref={dropRef}
-                className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer"
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                onClick={() => document.getElementById('file-input')?.click()}
-              >
-                <UploadIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-lg font-medium mb-2">
-                  {selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s)` : 'Clique ou arraste imagens aqui'}
-                </p>
-                <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB • Dica: também aceita Ctrl+V</p>
-                <input id="file-input" type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={handleFileSelect} className="hidden" />
-              </div>
-
-              {selectedFiles.length > 0 && (
-                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {selectedFiles.map((file, index) => (
-                    <div key={index} className="relative group">
-                      <img src={URL.createObjectURL(file)} alt={file.name} className="w-full h-24 object-cover rounded-lg" />
-                      <div className="absolute top-1 right-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 rounded-full bg-red-500/80 text-white hover:bg-red-500"
-                          onClick={(e) => { e.stopPropagation(); handleRemoveFile(file); }}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 rounded-b-lg truncate">
-                        {file.name}
-                      </div>
-                    </div>
-                  ))}
+                <div
+                  ref={dropRef}
+                  className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer"
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onClick={() => document.getElementById('file-input')?.click()}
+                >
+                  <UploadIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-lg font-medium mb-2">
+                    {selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s)` : 'Clique ou arraste imagens aqui'}
+                  </p>
+                  <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP até 10MB • Dica: também aceita Ctrl+V</p>
+                  <input id="file-input" type="file" multiple accept="image/*" className="hidden" />
                 </div>
-              )}
-            </CardContent>
-          </Card>
 
+                {selectedFiles.length > 0 && (
+                  <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {selectedFiles.map((file, index) => (
+                      <div key={index} className="relative group">
+                        <img src={URL.createObjectURL(file)} alt={file.name} className="w-full h-24 object-cover rounded-lg" />
+                        <div className="absolute top-1 right-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 rounded-full bg-red-500/80 text-white hover:bg-red-500"
+                            onClick={(e) => { e.stopPropagation(); handleRemoveFile(file); }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 rounded-b-lg truncate">
+                          {file.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Card de Categoria */}
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>2. Escolha a categoria</CardTitle>
@@ -471,12 +496,15 @@ export default function Upload() {
             </CardContent>
           </Card>
 
+          {/* Botão de Processar */}
           <div className="mb-8">
             <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || selectedFiles.length === 0 || !category}>
-              {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processando...</>) : 'Processar'}
+              {isProcessing ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" /> : ''} 
+              {isProcessing ? 'Processando...' : `Processar ${processedImages.filter(p => p.status === 'pending').length} Novas Imagens`}
             </Button>
           </div>
 
+          {/* Resultados */}
           {processedImages.length > 0 && (
             <Card>
               <CardHeader><CardTitle>Resultados</CardTitle></CardHeader>
@@ -487,6 +515,7 @@ export default function Upload() {
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-medium truncate pr-4">{image.originalFile.name}</h3>
                         <div className="flex items-center space-x-2 flex-shrink-0">
+                          {image.status === 'pending' && <><ImageIcon className="h-4 w-4 text-gray-400" /><span className="text-sm text-gray-500">Pendente</span></>}
                           {image.status === 'registering' && <><Loader2 className="h-4 w-4 animate-spin text-gray-500" /><span className="text-sm text-gray-500">Registrando...</span></>}
                           {image.status === 'processing' && <><Loader2 className="h-4 w-4 animate-spin text-blue-500" /><span className="text-sm text-blue-500">Processando...</span></>}
                           {image.status === 'completed' && <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-sm text-green-500">Concluído</span></>}
@@ -512,7 +541,7 @@ export default function Upload() {
                         ) : (
                           <div className="relative w-full h-full">
                             <img src={image.originalUrl} alt="Processando" className="w-full h-full object-contain" />
-                            {image.status !== 'pending' && (
+                            {(image.status === 'uploading' || image.status === 'converting' || image.status === 'registering' || image.status === 'processing') && (
                               <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
                                 <Loader2 className="h-10 w-10 animate-spin text-white" />
                               </div>
@@ -522,7 +551,7 @@ export default function Upload() {
                       </div>
 
                       {image.status === 'completed' && image.processedUrl && (
-                        <a href={image.processedUrl} download={`melhorafoto_${image.originalFile.name}`} className="mt-4 w-full inline-block">
+                        <a href={image.processedUrl} download={`${image.originalFile.name.substring(0, image.originalFile.name.lastIndexOf('.'))}_melhorada.png`} className="mt-4 w-full inline-block">
                           <Button className="w-full"><Download className="mr-2 h-4 w-4" /> Download</Button>
                         </a>
                       )}
