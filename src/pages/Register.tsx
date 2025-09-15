@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // 1. useEffect adicionado
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, Gift } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase'; // 2. Importar o Supabase client
+import { supabase } from '@/lib/supabase';
 
 export default function Register() {
   const [name, setName] = useState('');
@@ -18,11 +18,8 @@ export default function Register() {
   const [error, setError] = useState('');
   const { register, loading } = useAuth();
   const navigate = useNavigate();
+  const [freeImagesCount, setFreeImagesCount] = useState<number>(3);
 
-  // 3. Criar estado para armazenar o número de imagens grátis
-  const [freeImagesCount, setFreeImagesCount] = useState<number>(3); // Inicia com 3 para consistência
-
-  // 4. Buscar o valor real do banco de dados
   useEffect(() => {
     const fetchSettings = async () => {
       try {
@@ -31,9 +28,7 @@ export default function Register() {
           .select('free_images_for_new_users')
           .eq('id', 1)
           .single();
-
         if (error) throw error;
-        
         if (data && data.free_images_for_new_users) {
           setFreeImagesCount(data.free_images_for_new_users);
         }
@@ -71,7 +66,22 @@ export default function Register() {
       }
       navigate('/login');
     } else {
-      setError('Erro ao criar conta. Este e-mail pode já estar em uso.');
+      // --- LÓGICA DE ERRO INTELIGENTE ADICIONADA AQUI ---
+      const errorMessage = result.error?.message || 'Ocorreu um erro desconhecido.';
+      console.error("ERRO COMPLETO DO REGISTRO:", result.error);
+
+      // Mapeamento de erros conhecidos do Supabase para mensagens amigáveis
+      if (errorMessage.toLowerCase().includes('user already registered')) {
+        setError('Este e-mail já está cadastrado. Tente fazer login ou use outro e-mail.');
+      } else if (errorMessage.toLowerCase().includes('password should be at least 6 characters')) {
+        setError('Sua senha é muito curta. Por favor, use pelo menos 6 caracteres.');
+      } else if (errorMessage.toLowerCase().includes('weak password')) {
+          setError('Senha muito fraca. Tente usar uma combinação mais forte de letras, números e símbolos.');
+      } else {
+        // Para qualquer outro erro inesperado, mostra a mensagem técnica
+        setError(`Ocorreu um erro: ${errorMessage}`);
+      }
+      // --- FIM DA LÓGICA DE ERRO ---
     }
   };
 
@@ -92,7 +102,6 @@ export default function Register() {
         <Card>
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Criar sua conta</CardTitle>
-            {/* 5. Exibir o valor dinâmico */}
             <CardDescription>Cadastre-se gratuitamente e ganhe {freeImagesCount} imagens para testar</CardDescription>
             <div className="flex items-center justify-center mt-2 text-sm text-green-600 font-medium">
               <Gift className="w-4 h-4 mr-1" />
