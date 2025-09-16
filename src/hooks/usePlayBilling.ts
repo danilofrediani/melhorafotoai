@@ -1,13 +1,6 @@
 // src/hooks/usePlayBilling.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-/**
- * Hook compatível com a API usada em Pricing.tsx:
- *  - exporta: playStoreService, products, loadProducts, purchase, listPurchases, isLoading, isAvailable, error, debug
- *
- * Mantém o modo estático (android.test.*) e o uso de PaymentRequest/DigitalGoods.
- */
-
 declare global {
   interface Window {
     getDigitalGoodsService?: (method: "https://play.google.com/billing") => Promise<DigitalGoodsService>;
@@ -18,217 +11,165 @@ declare global {
 type DigitalGoodsService = {
   getDetails: (skus: string[]) => Promise<PlayProduct[]>;
   listPurchases?: () => Promise<any>;
-  // pode ter outros métodos dependendo do ambiente
 };
 
 export type PlayMoney = { value: string; currency: string };
-export type PlayProduct = {
-  itemId: string;
-  title?: string;
-  price?: PlayMoney;
-};
+export type PlayProduct = { itemId: string; title?: string; price?: PlayMoney };
 
-type UsePlayBillingOpts = {
+export type UsePlayBillingOpts = {
   productIds?: string[];
   forceStatic?: boolean;
   currency?: string;
 };
 
-export function usePlayBilling(isTwaMode: boolean, opts: UsePlayBillingOpts = {}) {
+export type PurchaseResult = { ok: boolean; purchaseToken?: string };
+
+export function usePlayBilling(opts: UsePlayBillingOpts = {}) {
   const { productIds = [], forceStatic = false, currency = "BRL" } = opts;
 
-  // Estado público (nomes que Pricing espera)
   const [products, setProducts] = useState<PlayProduct[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAvailable, setIsAvailable] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Internos
   const forceStaticRef = useRef<boolean>(forceStatic);
   forceStaticRef.current = forceStatic;
 
   const playStoreServiceRef = useRef<DigitalGoodsService | null>(null);
 
-  // debug object exposto
-  const debug = useMemo(
-    () => ({
-      FORCE_PLAY_STATIC: forceStaticRef.current,
-    }),
-    [forceStatic]
-  );
+  const debug = useMemo(() => ({ FORCE_PLAY_STATIC: forceStaticRef.current }), [forceStatic]);
 
-  // Detecta PaymentRequest / DigitalGoods (e inicializa a referência do serviço)
+  // Detecta PaymentRequest / DigitalGoods e conecta o serviço (se houver)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setIsLoading(true);
       setError(null);
-
       try {
         const w = window as any;
         const hasPR = typeof w.PaymentRequest === "function";
         const hasDG = typeof w.getDigitalGoodsService === "function";
-
-        // sinaliza disponibilidade básica
         setIsAvailable(Boolean(hasPR || hasDG));
 
-        // tenta obter a instância do serviço Digital Goods (se houver)
         if (hasDG && !forceStaticRef.current) {
           try {
             const dg = await w.getDigitalGoodsService("https://play.google.com/billing");
-            if (!cancelled) {
-              playStoreServiceRef.current = dg;
-              console.debug("[usePlayBilling] DigitalGoodsService conectado", !!dg);
-            }
-          } catch (dgErr) {
-            console.debug("[usePlayBilling] Falha ao conectar DigitalGoodsService", dgErr);
+            if (!cancelled) playStoreServiceRef.current = dg;
+          } catch {
             if (!cancelled) playStoreServiceRef.current = null;
           }
         }
       } catch (e) {
-        console.debug("[usePlayBilling] detection error", e);
         if (!cancelled) setError(String(e));
       } finally {
         if (!cancelled) setIsLoading(false);
       }
     })();
+    return () => { cancelled = true; };
+  }, []);
 
-    return () => {
-      cancelled = true;
-    };
-  }, []); // rodar só uma vez
-
-  // Função loadProducts (Pricing chama isso)
-  const loadProducts = useCallback(
-    async (ids: string[]) => {
-      setError(null);
-      setIsLoading(true);
-      try {
-        if (forceStaticRef.current) {
-          // modo estático -> devolver itens de teste
-          const staticProducts: PlayProduct[] = [
-            { itemId: "android.test.purchased", title: "Teste - Purchased", price: { value: "0", currency } },
-            { itemId: "android.test.canceled", title: "Teste - Canceled", price: { value: "0", currency } },
-            { itemId: "android.test.item_unavailable", title: "Teste - Unavailable", price: { value: "0", currency } },
-          ];
-          setProducts(staticProducts);
-          console.debug("[usePlayBilling] loadProducts -> modo estático, produtos locais montados");
-          return staticProducts;
-        }
-
-        const dg = playStoreServiceRef.current;
-        if (!dg) {
-          const w = window as any;
-          if (typeof w.getDigitalGoodsService === "function") {
-            // tenta reconectar de forma defensiva
-            try {
-              const newDg = await w.getDigitalGoodsService("https://play.google.com/billing");
-              playStoreServiceRef.current = newDg;
-            } catch (err) {
-              console.debug("[usePlayBilling] Reconexão DigitalGoods falhou", err);
-            }
-          }
-        }
-
-        const service = playStoreServiceRef.current;
-        if (!service || typeof service.getDetails !== "function") {
-          throw new Error("DigitalGoodsService indisponível ou sem getDetails()");
-        }
-
-        // garante array de ids
-        const skuIds = Array.isArray(ids) ? ids : [];
-        console.debug("[usePlayBilling] loadProducts -> solicitando getDetails", skuIds);
-        const details: PlayProduct[] = await service.getDetails(skuIds);
-        setProducts(details ?? []);
-        console.debug("[usePlayBilling] getDetails retornou", details);
-        return details ?? [];
-      } catch (e: any) {
-        console.error("[usePlayBilling] loadProducts error:", e);
-        setError(String(e?.message ?? e));
-        setProducts([]);
-        return [];
-      } finally {
-        setIsLoading(false);
+  const loadProducts = useCallback(async (ids: string[]) => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      if (forceStaticRef.current) {
+        const staticProducts: PlayProduct[] = [
+          { itemId: "android.test.purchased", title: "Teste - Purchased", price: { value: "0", currency } },
+          { itemId: "android.test.canceled", title: "Teste - Canceled", price: { value: "0", currency } },
+          { itemId: "android.test.item_unavailable", title: "Teste - Unavailable", price: { value: "0", currency } },
+        ];
+        setProducts(staticProducts);
+        return staticProducts;
       }
-    },
-    [currency]
-  );
 
-  // Função listPurchases (diagnóstico)
+      const w = window as any;
+      if (!playStoreServiceRef.current && typeof w.getDigitalGoodsService === "function") {
+        try {
+          playStoreServiceRef.current = await w.getDigitalGoodsService("https://play.google.com/billing");
+        } catch {/* noop */}
+      }
+
+      const service = playStoreServiceRef.current;
+      if (!service || typeof service.getDetails !== "function") {
+        throw new Error("DigitalGoodsService indisponível ou sem getDetails()");
+      }
+
+      const skuIds = Array.isArray(ids) ? ids : [];
+      const details: PlayProduct[] = await service.getDetails(skuIds);
+      setProducts(details ?? []);
+      return details ?? [];
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+      setProducts([]);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currency]);
+
   const listPurchases = useCallback(async () => {
     try {
       const service = playStoreServiceRef.current;
-      if (!service || typeof service.listPurchases !== "function") {
-        console.debug("[usePlayBilling] listPurchases: não disponível no serviço");
-        return null;
-      }
+      if (!service || typeof service.listPurchases !== "function") return null;
       const res = await service.listPurchases();
-      console.debug("[usePlayBilling] listPurchases:", res);
       return res;
-    } catch (e) {
-      console.error("[usePlayBilling] listPurchases error", e);
+    } catch {
       return null;
     }
   }, []);
 
-  // Função purchase (Pricing chama purchase(sku))
   const purchase = useCallback(
-    async (sku: string, opts?: { staticSku?: string }) => {
+    async (sku: string): Promise<PurchaseResult> => {
       setError(null);
       setIsLoading(true);
-
       try {
         const w = window as any;
-        if (typeof w.PaymentRequest !== "function") {
-          throw new Error("PaymentRequest indisponível");
-        }
+        if (typeof w.PaymentRequest !== "function") throw new Error("PaymentRequest indisponível");
 
-        const effectiveSku = forceStaticRef.current ? opts?.staticSku ?? "android.test.purchased" : sku;
+        const effectiveSku = forceStaticRef.current ? "android.test.purchased" : sku;
 
         const methodData = [
-          {
-            supportedMethods: "https://play.google.com/billing",
-            data: {
-              sku: effectiveSku,
-              productId: effectiveSku,
-              type: "inapp",
-            },
-          },
+          { supportedMethods: "https://play.google.com/billing", data: { sku: effectiveSku, productId: effectiveSku, type: "inapp" } },
         ];
+        const details: any = { total: { label: "Total", amount: { currency, value: "0" } } };
 
-        const details: PaymentDetailsInit = {
-          total: { label: "Total", amount: { currency, value: "0" } },
-        };
-
-        console.debug("[usePlayBilling] opening PaymentRequest for sku", effectiveSku);
         const request = new (w.PaymentRequest as any)(methodData, details);
-
-        try {
-          await request.canMakePayment?.();
-        } catch {
-          // canMakePayment pode falhar em alguns ambientes; não é fatal
-          console.debug("[usePlayBilling] canMakePayment falhou/lançou (não fatal)");
-        }
-
+        try { await request.canMakePayment?.(); } catch {/* não fatal */}
         const response = await request.show();
-        try {
-          await response.complete?.("success");
-        } catch {
-          // noop
+        try { await response.complete?.("success"); } catch {/* noop */}
+
+        // Tentar obter o purchaseToken pela DigitalGoods API
+        let purchaseToken: string | undefined;
+        const service = playStoreServiceRef.current;
+
+        if (service && typeof (service as any).listPurchases === "function") {
+          // tentar algumas vezes, pois o token pode demorar a aparecer
+          for (let i = 0; i < 6 && !purchaseToken; i++) {
+            try {
+              const lp = await (service as any).listPurchases();
+              const list = Array.isArray(lp) ? lp : (lp?.purchases ?? []);
+              const found = list?.find?.((it: any) => it.itemId === sku || it.productId === sku);
+              purchaseToken = found?.purchaseToken ?? found?.token;
+            } catch {/* noop */}
+            if (!purchaseToken) await new Promise(r => setTimeout(r, 400));
+          }
         }
 
-        // Observação: a resposta via TWA/DigitalGoods pode não retornar token aqui.
-        // Retornamos true se não houve exceção (mantemos compatibilidade com o fluxo atual).
-        console.debug("[usePlayBilling] PaymentRequest finalizado sem erro");
-        return true;
-      } catch (e: any) {
-        console.error("[usePlayBilling] purchase error:", e);
-        if (e?.name === "AbortError") {
-          setError("Payment app returned RESULT_CANCELED / AbortError");
-        } else {
-          setError(String(e?.message ?? e));
+        if (!purchaseToken && !forceStaticRef.current) {
+          // sem token não dá pra validar no backend
+          return { ok: false };
         }
-        return false;
+
+        // em modo estático, devolvemos um token fake só pra testes locais
+        if (!purchaseToken && forceStaticRef.current) {
+          purchaseToken = `FAKE_PR_${Date.now()}`;
+        }
+
+        return { ok: true, purchaseToken };
+      } catch (e: any) {
+        if (e?.name === "AbortError") setError("Payment app returned RESULT_CANCELED / AbortError");
+        else setError(String(e?.message ?? e));
+        return { ok: false };
       } finally {
         setIsLoading(false);
       }
@@ -236,17 +177,9 @@ export function usePlayBilling(isTwaMode: boolean, opts: UsePlayBillingOpts = {}
     [currency]
   );
 
-  // Expor a referência do serviço (compatibilidade com Pricing.tsx)
   const playStoreService = playStoreServiceRef.current;
 
-  // Quando o hook é inicializado, se productIds vierem por opts e o modo não for estático,
-  // podemos carregar automaticamente (opcional). Aqui deixamos a decisão a quem chama (Pricing).
-  useEffect(() => {
-    // não carregamos automaticamente para não causar chamadas inesperadas em SSR/dev
-  }, []);
-
   return {
-    // nomes que Pricing.tsx espera
     playStoreService,
     products,
     loadProducts,
@@ -255,7 +188,6 @@ export function usePlayBilling(isTwaMode: boolean, opts: UsePlayBillingOpts = {}
     isLoading,
     isAvailable,
     error,
-    // extras
     debug,
   };
 }

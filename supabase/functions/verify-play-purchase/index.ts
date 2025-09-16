@@ -13,14 +13,12 @@ const SKU_TO_CREDITS: Record<string, number> = {
   credits_20: 20,
   credits_50: 50
 };
-// ✅ Adicionado cabeçalhos de CORS para reutilização
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 async function getAccessToken() {
-  // ... (código sem alteração)
   const now = Math.floor(Date.now() / 1000);
   const pk = await importPKCS8(SA_PK, "RS256");
   const jwt = await new SignJWT({ scope: SCOPE }).setProtectedHeader({ alg: "RS256", typ: "JWT" }).setIssuedAt(now).setIssuer(SA_EMAIL).setSubject(SA_EMAIL).setAudience(GOOGLE_TOKEN_URL).setExpirationTime(now + 3600).sign(pk);
@@ -58,7 +56,7 @@ Deno.serve(async (req)=>{
       return new Response(JSON.stringify({ error: "Parâmetros inválidos" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    let orderId = purchaseToken; // Usa o token de teste como orderId para simulações
+    let orderId = purchaseToken;
 
     if (purchaseToken.startsWith('FAKE_PURCHASE_TOKEN_')) {
       console.log(`MODO SIMULAÇÃO: Compra aprovada para o SKU: ${sku}`);
@@ -67,7 +65,7 @@ Deno.serve(async (req)=>{
       const getUrl = `${ANDROID_PUBLISHER}/applications/${PACKAGE_NAME}/purchases/products/${encodeURIComponent(sku)}/tokens/${encodeURIComponent(purchaseToken)}`;
       const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
       const purchase = await getRes.json();
-      orderId = purchase.orderId; // Usa o orderId real da compra
+      orderId = purchase.orderId;
       
       if (!getRes.ok || purchase.purchaseState !== 0) {
         return new Response(JSON.stringify({ error: "Compra inválida ou não concluída.", details: purchase }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -99,24 +97,35 @@ Deno.serve(async (req)=>{
         throw new Error(`Falha ao adicionar créditos: ${rpcError.message}`);
       }
 
-      // ✅ CORREÇÃO 2: Registrando a transação no histórico
+      // ✅ --- AJUSTE FINAL AQUI --- ✅
+      // 1. Buscamos o ID do pacote no banco de dados usando o SKU do Google
+      const { data: packageData, error: pkgError } = await supabaseAdmin
+        .from('packages')
+        .select('id, price')
+        .eq('google_play_sku', sku)
+        .single();
+      
+      if(pkgError) {
+        console.error("Erro ao buscar o pacote correspondente ao SKU para registrar a transação:", pkgError);
+        // Não paramos o processo, pois o crédito já foi dado. Apenas logamos.
+      }
+
+      // 2. Registramos a transação com o package_id correto
       const { error: transactionError } = await supabaseAdmin.from('transactions').insert({
         user_id: user.id,
-        package_id: null, // O SKU do Google não é um UUID, então deixamos nulo ou criamos um mapeamento
-        amount: 0, // A API do Google não nos dá o preço aqui, podemos buscar ou deixar 0
+        package_id: packageData?.id || null, // Usamos o ID que encontramos
+        amount: packageData?.price || 0, // Usamos o preço do nosso banco
         currency: 'BRL',
         status: 'completed',
-        payment_method: 'google_play',
+        payment_method: purchaseToken.startsWith('FAKE_PURCHASE_TOKEN_') ? 'google_play_test' : 'google_play',
         metadata: { sku, provider_order_id: orderId }
       });
 
       if (transactionError) {
-        // Logamos o erro mas não paramos o processo, pois o usuário já recebeu os créditos
         console.error("Erro ao registrar a transação, mas os créditos foram concedidos:", transactionError);
       }
     }
 
-    // ✅ CORREÇÃO 1: Adicionando cabeçalhos de CORS à resposta de sucesso
     return new Response(JSON.stringify({ 
       ok: true, 
       creditsAdded: creditsToAdd, 
