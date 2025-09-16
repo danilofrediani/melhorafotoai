@@ -17,7 +17,7 @@ interface AuthContextType {
   session: Session | null;
   profile: DbUser | null;
   isLoadingProfile: boolean;
-  refetchProfile: () => Promise<void>;
+  refetchProfile: () => Promise<void>; // A assinatura não muda para o consumidor
   login: (email: string, password: string) => Promise<AuthLoginResult>;
   register: (email: string, password: string, name: string, userType: DbUser['user_type']) => Promise<{ success: boolean; error?: RegisterError }>;
   logout: () => Promise<void>;
@@ -32,6 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<DbUser | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
+  // A função handlePostLogin permanece a mesma
   const handlePostLogin = async () => {
     const pendingPackageId = localStorage.getItem('pendingPurchasePackageId');
     if (pendingPackageId) {
@@ -51,34 +52,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      setIsLoadingProfile(false);
+      if (session?.user) {
+        // Se já tem sessão, busca o perfil
+        refetchProfile(session.user);
+      } else {
+        setIsLoadingProfile(false);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
-        setUser(session?.user ?? null);
-        setIsLoadingProfile(false);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
 
-        if (_event === 'SIGNED_IN') {
-          // Após o login, acionamos a busca do perfil e a verificação de compra pendente
-          refetchProfile(); 
+        if (_event === 'SIGNED_IN' && currentUser) {
+          await refetchProfile(currentUser);
           await handlePostLogin();
         }
         if (_event === 'SIGNED_OUT') {
           setProfile(null);
         }
+        if (!currentUser) {
+          setIsLoadingProfile(false);
+        }
       }
     );
     return () => subscription.unsubscribe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refetchProfile = async () => {
-    if (user) {
+  // ✅ --- AJUSTE APLICADO AQUI --- ✅
+  const refetchProfile = async (currentUser: SupaUser | null = user) => {
+    if (currentUser) {
       setIsLoadingProfile(true);
       try {
-        const dbUser = await userService.ensureUserRecord(user);
-        setProfile(dbUser);
+        // Chamamos a mesma função de antes, mas agora vamos retornar o resultado
+        const dbUser = await userService.ensureUserRecord(currentUser);
+        setProfile(dbUser); // Atualizamos o estado do contexto
+        return dbUser; // E RETORNAMOS o perfil atualizado
       } catch (err) {
         console.error('Erro ao recarregar o perfil do usuário:', err);
         setProfile(null);
@@ -86,6 +98,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoadingProfile(false);
       }
     }
+    // Retorna undefined ou null se não houver usuário
+    return undefined;
   };
   
   const login = async (email: string, password: string): Promise<AuthLoginResult> => {
@@ -97,15 +111,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     if (data.user) {
       const dbUser = await userService.getUserById(data.user.id);
+      setProfile(dbUser); // Seta o perfil no login
       return { success: true, role: dbUser?.user_type };
     }
     return { success: false, error: 'UNKNOWN_ERROR' };
   };
 
   const register = async (email: string, password: string, name: string, userType: DbUser['user_type']): Promise<{ success: boolean; error?: RegisterError }> => {
-    const { data: existingUser } = await supabase.from('users').select('id').eq('email', email.trim().toLowerCase()).single();
+    const { data: existingUser } = await supabase.from('profiles').select('id').eq('email', email.trim().toLowerCase()).single();
     if (existingUser) return { success: false, error: 'EMAIL_ALREADY_IN_USE' };
-
     const { data, error } = await supabase.auth.signUp({ email: email.trim().toLowerCase(), password, options: { data: { name, user_type: userType } } });
     if (error) {
       console.error('Erro no Supabase Auth SignUp:', error);
