@@ -2,12 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type DGPrice = { value: string; currency: string };
-type DGDetail = {
-  itemId: string;
-  title: string;
-  price?: DGPrice;
-  description?: string;
-};
+type DGDetail = { itemId: string; title?: string; price?: DGPrice; description?: string };
+type DGPurchase = { itemId: string; purchaseToken: string; state?: string };
+
 export type PlayProduct = {
   itemId: string;
   title: string;
@@ -15,18 +12,26 @@ export type PlayProduct = {
   description?: string;
 };
 
-type PurchaseFn = (sku: string) => Promise<string | null>;
 type HookReturn = {
   playStoreService: any | null;
   products: PlayProduct[];
   loadProducts: (skus: string[]) => Promise<void>;
-  purchase: PurchaseFn;
+  purchase: (sku: string) => Promise<string | null>;
   isLoading: boolean;
   isAvailable: boolean;
   error: string | null;
 };
 
 const PLAY_METHOD = 'https://play.google.com/billing';
+
+// Atalho de console com prefixo
+const log = (...args: any[]) => console.log('[DG]', ...args);
+const logPR = (...args: any[]) => console.log('[PR]', ...args);
+
+// ⚠️ Durante os testes, podemos consumir automaticamente uma compra antiga do mesmo SKU
+// para evitar o erro “item already owned”. Em produção, isso deve ser feito só
+// após validação/entrega no backend.
+const DEBUG_AUTOCONSUME = true;
 
 export default function usePlayBilling(isTwa: boolean): HookReturn {
   const [isLoading, setIsLoading] = useState(false);
@@ -35,24 +40,28 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
   const [products, setProducts] = useState<PlayProduct[]>([]);
   const serviceRef = useRef<any | null>(null);
 
+  // Init básico
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setError(null);
-        if (!isTwa) {
-          setIsAvailable(false);
-          return;
-        }
+        if (!isTwa) { setIsAvailable(false); return; }
+
         const hasDG = typeof (window as any).getDigitalGoodsService === 'function';
-        const hasPayments = typeof (window as any).PaymentRequest === 'function';
-        if (!hasDG || !hasPayments) { setIsAvailable(false); return; }
+        const hasPR = typeof (window as any).PaymentRequest === 'function';
+        log('env', { isTwa, hasDG, hasPR });
+
+        if (!hasDG || !hasPR) { setIsAvailable(false); return; }
 
         if (!serviceRef.current) {
           try {
             const svc = await (window as any).getDigitalGoodsService(PLAY_METHOD);
+            log('getDigitalGoodsService =>', !!svc);
             if (!cancelled) serviceRef.current = svc ?? null;
-          } catch {/* ok */}
+          } catch (e: any) {
+            log('getDigitalGoodsService error', e?.name, e?.message);
+          }
         }
         if (!cancelled) setIsAvailable(true);
       } catch (e: any) {
@@ -81,6 +90,8 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
       if (!svc) throw new Error('Serviço do Google Play indisponível.');
 
       const details: DGDetail[] = await svc.getDetails(skus);
+      log('getDetails', details);
+
       const normalized: PlayProduct[] = (details || []).map((d) => ({
         itemId: d.itemId,
         title: (d.title || d.itemId).replace(/\s*\(.*?\)\s*$/, ''),
@@ -96,7 +107,56 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
     }
   }, [ensureService, isTwa]);
 
-  const purchase: PurchaseFn = useCallback(async (sku: string) => {
+  // Pré-voo: checa capacidade, instrumento e compras existentes
+  const preflight = useCallback(async (request: any, sku: string, svc: any) => {
+    try {
+      if (typeof request.canMakePayment === 'function') {
+        const can = await request.canMakePayment();
+        logPR('canMakePayment =>', can);
+        if (!can) throw new Error('clientAppUnavailable');
+      }
+      if (typeof request.hasEnrolledInstrument === 'function') {
+        try {
+          const has = await request.hasEnrolledInstrument();
+          logPR('hasEnrolledInstrument =>', has);
+          // Se false, normalmente o Play fecha o fluxo ou mostra método de teste só se a conta for testadora
+        } catch (e: any) {
+          logPR('hasEnrolledInstrument error =>', e?.name, e?.message);
+        }
+      }
+    } catch (e: any) {
+      throw e; // propaga para exibirmos no playError
+    }
+
+    // Lista compras existentes (pode estar “PURCHASED” não consumida)
+    try {
+      const purchases: DGPurchase[] = await svc.listPurchases();
+      log('listPurchases (before)', purchases);
+
+      const sameSku = purchases?.filter(p => p.itemId === sku) || [];
+      if (sameSku.length) {
+        log('existing purchases for sku', sku, sameSku);
+        // Para testes, consome automaticamente para liberar nova compra
+        if (DEBUG_AUTOCONSUME) {
+          for (const p of sameSku) {
+            if (p.purchaseToken) {
+              try {
+                log('consume start', p.purchaseToken);
+                await svc.consume(p.purchaseToken);
+                log('consume ok', p.purchaseToken);
+              } catch (e: any) {
+                log('consume error', e?.name, e?.message);
+              }
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      log('listPurchases error', e?.name, e?.message);
+    }
+  }, []);
+
+  const purchase = useCallback(async (sku: string) => {
     setError(null);
     try {
       if (!isTwa) throw new Error('Compra disponível apenas dentro do app da Play.');
@@ -105,13 +165,13 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
       const svc = await ensureService();
       if (!svc) throw new Error('Serviço do Google Play indisponível.');
 
-      // Recupera detalhes p/ preencher total (alguns devices exigem)
+      // Busca detail para preencher total (alguns aparelhos exigem fields válidos)
       let price: DGPrice = { value: '0', currency: 'BRL' };
       let title = sku;
       try {
         const [detail] = await svc.getDetails([sku]);
         if (detail?.price?.value) price = detail.price!;
-        if (detail?.title) title = detail.title.replace(/\s*\(.*?\)\s*$/, '');
+        if (detail?.title) title = (detail.title as string).replace(/\s*\(.*?\)\s*$/, '');
       } catch {/* segue */}
 
       const method: PaymentMethodData = {
@@ -120,44 +180,33 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
       } as any;
 
       const details: PaymentDetailsInit = {
-        total: {
-          label: title,
-          amount: { currency: price.currency || 'BRL', value: String(price.value || '0') },
-        },
+        total: { label: title, amount: { currency: price.currency || 'BRL', value: String(price.value || '0') } },
       };
 
       const request = new (window as any).PaymentRequest([method], details);
 
-      // 1) Checa capacidade antes de abrir o sheet
-      try {
-        const can = await request.canMakePayment();
-        if (!can) {
-          setError('clientAppUnavailable');
-          return null;
-        }
-      } catch (e:any) {
-        // Alguns Chrome podem lançar erro aqui — só loga
-        console.log('[PR] canMakePayment error:', e?.name, e?.message);
-      }
+      // Pré-voo (capacidade, instrumento e compras existentes)
+      await preflight(request, sku, svc);
 
-      // 2) Tenta abrir o sheet
+      // Abre o sheet
       let response: PaymentResponse | null = null;
       try {
         response = await request.show();
       } catch (err: any) {
-        const name = err?.name || 'UnknownError';
+        // Aqui pegamos a causa real do fechamento
+        const name = err?.name || 'AbortError';
         const msg = err?.message || String(err);
-        // Mostra o erro REAL no debug
         setError(`${name}: ${msg}`);
+        logPR('show() error =>', name, msg, err);
         return null;
       }
 
-      // 3) Extrai o token
+      // Extrai token
       try {
         try {
-          console.log('[PR] details =', JSON.stringify((response as any)?.details || {}));
+          logPR('details =', JSON.stringify((response as any)?.details || {}));
         } catch {
-          console.log('[PR] details (raw) =', (response as any)?.details);
+          logPR('details (raw) =', (response as any)?.details);
         }
         const d: any = (response as any)?.details || {};
         const token =
@@ -181,7 +230,7 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
       setError(err?.message ?? 'Ocorreu um erro durante a compra.');
       return null;
     }
-  }, [ensureService, isAvailable, isTwa]);
+  }, [ensureService, isAvailable, isTwa, preflight]);
 
   return {
     playStoreService: serviceRef.current,
