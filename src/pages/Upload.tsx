@@ -49,7 +49,7 @@ const PRESET_MAX_SIDE = 2048;
 const TARGET_MAX_BYTES = 7.5 * 1024 * 1024;
 
 export default function Upload() {
-  const { user, profile, refetchProfile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('project');
@@ -338,8 +338,10 @@ export default function Upload() {
           throw new Error(error?.message || data.error || 'Erro na function');
         }
         
-        const { data: publicUrlData } = supabase.storage.from('processed-images').getPublicUrl(data.processed_file_path);
-        const finalProcessedUrl = publicUrlData.publicUrl;
+        // --- ✅ CORREÇÃO APLICADA AQUI ✅ ---
+        // Usamos a URL pública que o back-end já nos enviou.
+        const finalProcessedUrl = data.processed_url;
+        // --- FIM DA CORREÇÃO ---
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? ({
           ...img,
@@ -362,7 +364,6 @@ export default function Upload() {
         toast.error(`Falha em "${imageToProcess.originalFile.name}": ${errorMessage}`, {
           duration: 10000,
         });
-        // Não para o processo inteiro, apenas continua para o próximo
         continue;
       }
     }
@@ -375,7 +376,6 @@ export default function Upload() {
     setProcessedImages([]);
   }
 
-  // Lógica para o botão de processar
   const pendingImagesCount = processedImages.filter(p => p.status === 'pending').length;
   const hasCompletedImages = processedImages.some(p => p.status === 'completed' || p.status === 'error');
   const isDoneProcessing = !isProcessing && hasCompletedImages;
@@ -442,7 +442,7 @@ export default function Upload() {
                     {selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s)` : 'Clique ou arraste imagens aqui'}
                   </p>
                   <p className="text-sm text-gray-500">Suporta JPG, PNG, WebP • Dica: também aceita Ctrl+V</p>
-                  <input id="file-input" type="file" multiple accept="image/*" className="hidden" />
+                  <input id="file-input" type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} />
                 </div>
 
                 {selectedFiles.length > 0 && (
