@@ -1,18 +1,45 @@
-import { useState, useEffect } from 'react';
+// src/hooks/useIsTwa.ts
+import { useEffect, useState } from 'react';
 
 /**
- * Hook que verifica de forma síncrona e imediata se a aplicação 
- * está rodando dentro de um Trusted Web Activity (TWA), ou seja, o app Android.
+ * Detecção robusta de TWA:
+ * - referrer android-app://... (válido para TWA verificada)
+ * - display-mode: standalone (Chrome/Android)
+ * - sem token de WebView (; wv)
+ * - fallback para hints de bridge
  */
-export const useIsTwa = () => {
-  const [isTwaMode, setIsTwaMode] = useState(false);
+export default function useIsTwa(): boolean {
+  const [isTwa, setIsTwa] = useState(false);
 
   useEffect(() => {
-    // A verificação é feita lendo o "user agent" do navegador.
-    // O TWA adiciona a string 'twa' para se identificar.
-    const userAgent = navigator.userAgent.toLowerCase();
-    setIsTwaMode(userAgent.includes('twa'));
-  }, []); // Roda apenas uma vez, no carregamento inicial.
+    try {
+      const ua = navigator.userAgent || '';
+      const isAndroid = /Android/i.test(ua);
+      const isChrome = /Chrome\/\d+/i.test(ua);
+      const isWebView = /; wv\)/i.test(ua); // WebView costuma ter ; wv
+      const ref = document.referrer || '';
+      const refIsAndroidApp = ref.startsWith('android-app://');
+      const displayStandalone =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(display-mode: standalone)').matches;
 
-  return isTwaMode;
-};
+      // Alguns fabricantes expõem bridges
+      const hasBridge =
+        (window as any).__TWA_BRIDGE__ ||
+        (window as any).TrustedWebActivity ||
+        (window as any).AndroidBridge;
+
+      const detected =
+        refIsAndroidApp ||
+        (displayStandalone && isAndroid && isChrome && !isWebView) ||
+        Boolean(hasBridge);
+
+      setIsTwa(Boolean(detected));
+    } catch {
+      setIsTwa(false);
+    }
+  }, []);
+
+  return isTwa;
+}
+
