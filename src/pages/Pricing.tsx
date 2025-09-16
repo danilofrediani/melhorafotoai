@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+// src/pages/Pricing.tsx
+import { useEffect, useState } from 'react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { Card } from '@/components/ui/card';
@@ -12,13 +13,14 @@ import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+
+import { useIsTwa } from '@/hooks/useIsTwa';
 import usePlayBilling from '@/hooks/usePlayBilling';
 
-// Mapeamento dos produtos no Google Play -> metadados locais (quantidade/descrição)
 const googlePlayProductMap: Record<string, Partial<PackageType>> = {
-  'credits_10': { images: 10, description: '10 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: false },
-  'credits_20': { images: 20, description: '20 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: true },
-  'credits_50': { images: 50, description: '50 créditos para edição\nQualidade Profissional\nSuporte Prioritário', is_most_popular: false },
+  credits_10: { images: 10, description: '10 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: false },
+  credits_20: { images: 20, description: '20 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: true },
+  credits_50: { images: 50, description: '50 créditos para edição\nQualidade Profissional\nSuporte Prioritário', is_most_popular: false },
 };
 
 const getIcon = (type: string) => {
@@ -28,70 +30,123 @@ const getIcon = (type: string) => {
 };
 
 export default function Pricing() {
-  const [stripePackages, setStripePackages] = useState<PackageType[]>([]);
-  const [googlePackages, setGooglePackages] = useState<PackageType[]>([]);
-  const [loadingStripe, setLoadingStripe] = useState(true);
+  const [displayPackages, setDisplayPackages] = useState<PackageType[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isPurchasingId, setIsPurchasingId] = useState<string | null>(null);
-
   const { profile } = useAuth();
   const navigate = useNavigate();
 
-  // Play Billing hook (decisão principal: available)
+  const isTwaMode = useIsTwa();
+
+  // Só habilita Play Billing no TWA
   const {
-    available: playAvailable,
+    playStoreService,
     products: googlePlayProducts,
     loadProducts,
     purchase: googlePlayPurchase,
-    isLoading: loadingPlay
-  } = usePlayBilling();
+    isLoading: isPlayBillingLoading,
+    isAvailable: isPlayAvailable,
+    error: playError,
+  } = usePlayBilling(isTwaMode);
 
-  // 1) Sempre tentamos carregar os produtos do Play; se não houver Play, isso apenas não faz nada
+  // WEB -> Stripe
   useEffect(() => {
-    loadProducts(['credits_10', 'credits_20', 'credits_50']);
-  }, [loadProducts]);
-
-  // 2) Carregamos também os pacotes do Stripe (para Web/fallback)
-  useEffect(() => {
-    const fetchStripeData = async () => {
-      setLoadingStripe(true);
+    const loadWebPackages = async () => {
+      if (isTwaMode) { setLoading(false); return; }
+      setLoading(true);
       try {
         const stripeData = await packageService.getActivePackages();
-        setStripePackages(stripeData || []);
+        setDisplayPackages(stripeData || []);
       } catch {
-        toast.error("Não foi possível carregar os planos.");
+        toast.error('Não foi possível carregar os planos.');
       } finally {
-        setLoadingStripe(false);
+        setLoading(false);
       }
     };
-    fetchStripeData();
-  }, []);
+    loadWebPackages();
+  }, [isTwaMode]);
 
-  // 3) Transformamos os produtos do Play em nosso formato interno
+  // APP/TWA -> Google Play Billing
   useEffect(() => {
-    if (googlePlayProducts.length > 0) {
-      const transformed = googlePlayProducts.map(p => ({
-        id: p.itemId,
-        name: p.title.replace(' (MelhoraFotoAI)', ''),
-        price: parseFloat(p.price.value),
-        images: googlePlayProductMap[p.itemId]?.images || 0,
-        type: 'avulso',
-        description: googlePlayProductMap[p.itemId]?.description || '',
-        is_most_popular: googlePlayProductMap[p.itemId]?.is_most_popular || false,
-        created_at: new Date().toISOString(),
-        is_active: true,
-      }));
-      setGooglePackages(transformed);
-    } else {
-      setGooglePackages([]);
+    const loadPlayProducts = async () => {
+      if (!isTwaMode) return;
+      if (isPlayBillingLoading) return;
+      if (!isPlayAvailable) { setDisplayPackages([]); return; }
+
+      setLoading(true);
+      await loadProducts(['credits_10', 'credits_20', 'credits_50']);
+      setLoading(false);
+    };
+    loadPlayProducts();
+  }, [isTwaMode, isPlayBillingLoading, isPlayAvailable, loadProducts]);
+
+  // Converte produtos GP em packages
+  useEffect(() => {
+    if (!isTwaMode) return;
+    if (googlePlayProducts.length === 0) return;
+
+    const transformed = googlePlayProducts.map(p => ({
+      id: p.itemId,
+      name: p.title.replace(' (MelhoraFotoAI)', ''),
+      price: parseFloat(p.price.value),
+      images: googlePlayProductMap[p.itemId]?.images || 0,
+      type: 'avulso',
+      description: googlePlayProductMap[p.itemId]?.description || '',
+      is_most_popular: googlePlayProductMap[p.itemId]?.is_most_popular || false,
+      created_at: new Date().toISOString(),
+      is_active: true,
+    })) as PackageType[];
+
+    setDisplayPackages(transformed);
+  }, [isTwaMode, googlePlayProducts]);
+
+  const handleStripePurchase = async (pkg: PackageType) => {
+    if (!profile) { localStorage.setItem('pendingPurchasePackageId', pkg.id); navigate('/login'); return; }
+    setIsPurchasingId(pkg.id);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', { body: { package_id: pkg.id } });
+      if (error || data?.error) throw new Error(error?.message || data?.error || 'Não foi possível iniciar o pagamento.');
+      if (data?.checkout_url) window.location.href = data.checkout_url;
+      else throw new Error('URL de checkout não recebida.');
+    } catch (err: any) {
+      toast.error(`Falha: ${err.message}`);
+    } finally {
+      setIsPurchasingId(null);
     }
-  }, [googlePlayProducts]);
+  };
 
-  // 4) Qual lista mostrar? Se Play estiver disponível e já tivermos produtos, prioriza Play.
-  const usingPlay = playAvailable && googlePackages.length > 0;
-  const displayPackages = usingPlay ? googlePackages : stripePackages;
+  const handleGooglePlayPurchase = async (pkg: PackageType) => {
+    if (!profile) { toast.info('Você precisa estar logado para comprar.'); navigate('/login'); return; }
+    if (!playStoreService) { toast.error('Pagamento do Google Play indisponível neste dispositivo.'); return; }
 
-  // Loading combinado:
-  const finalLoading = (usingPlay ? loadingPlay : loadingStripe) && displayPackages.length === 0;
+    setIsPurchasingId(pkg.id);
+    try {
+      const purchaseToken = await googlePlayPurchase(pkg.id);
+      if (purchaseToken) {
+        toast.success('Compra realizada! Validando e adicionando créditos...');
+        // TODO: validar no backend:
+        // await supabase.functions.invoke('verify-google-purchase', { body: { token: purchaseToken } });
+      }
+    } catch (err: any) {
+      toast.error(`Falha na compra: ${err.message}`);
+    } finally {
+      setIsPurchasingId(null);
+    }
+  };
+
+  const avulsoPackages = displayPackages.filter(p => p.type === 'avulso').sort((a, b) => a.price - b.price);
+  const mensalPackages = displayPackages.filter(p => p.type === 'mensal').sort((a, b) => a.price - b.price);
+  const profissionalPackages = displayPackages.filter(p => p.type === 'profissional').sort((a, b) => a.price - b.price);
+
+  const getFirstAvailableTab = () => {
+    if (avulsoPackages.length > 0) return 'avulso';
+    if (!isTwaMode && mensalPackages.length > 0) return 'mensal';
+    if (!isTwaMode && profissionalPackages.length > 0) return 'profissional';
+    return isTwaMode ? 'avulso' : '';
+  };
+  const firstAvailableTab = getFirstAvailableTab();
+
+  const finalLoading = loading || (isTwaMode && isPlayBillingLoading && displayPackages.length === 0);
   if (finalLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -100,59 +155,21 @@ export default function Pricing() {
     );
   }
 
-  // Handlers de compra
-  const handleStripePurchase = async (pkg: PackageType) => {
-    if (!profile) { localStorage.setItem('pendingPurchasePackageId', pkg.id); navigate('/login'); return; }
-    setIsPurchasingId(pkg.id);
-    try {
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', { body: { package_id: pkg.id } });
-      if (error || (data && data.error)) throw new Error(error?.message || data?.error || 'Não foi possível iniciar o pagamento.');
-      if (data?.checkout_url) window.location.href = data.checkout_url;
-      else throw new Error('URL de checkout não recebida.');
-    } catch (error: any) {
-      toast.error(`Falha: ${error.message}`);
-    } finally {
-      setIsPurchasingId(null);
-    }
-  };
-
-  const handleGooglePlayPurchase = async (pkg: PackageType) => {
-    if (!profile) { toast.info('Você precisa estar logado para comprar.'); navigate('/login'); return; }
-    setIsPurchasingId(pkg.id);
-    try {
-      const purchaseToken = await googlePlayPurchase(pkg.id);
-      if (purchaseToken) {
-        toast.success("Compra realizada! Validando e adicionando créditos...");
-        // TODO: chamar sua edge function que valida e credita:
-        // await supabase.functions.invoke('verify-google-purchase', { body: { token: purchaseToken, sku: pkg.id } });
-      }
-    } catch (error: any) {
-      toast.error(`Falha na compra: ${error.message}`);
-    } finally {
-      setIsPurchasingId(null);
-    }
-  };
-
-  const purchaseHandler = usingPlay ? handleGooglePlayPurchase : handleStripePurchase;
-
-  // Organização por abas (no Play mostramos só “avulso”)
-  const avulsoPackages = displayPackages.filter(p => p.type === 'avulso').sort((a, b) => a.price - b.price);
-  const mensalPackages = usingPlay ? [] : displayPackages.filter(p => p.type === 'mensal').sort((a, b) => a.price - b.price);
-  const profissionalPackages = usingPlay ? [] : displayPackages.filter(p => p.type === 'profissional').sort((a, b) => a.price - b.price);
-
-  const firstAvailableTab = useMemo(() => {
-    if (avulsoPackages.length > 0) return 'avulso';
-    if (mensalPackages.length > 0) return 'mensal';
-    if (profissionalPackages.length > 0) return 'profissional';
-    return 'avulso';
-  }, [avulsoPackages.length, mensalPackages.length, profissionalPackages.length]);
+  const showPlayBillingFallback =
+    isTwaMode && !isPlayBillingLoading && !isPlayAvailable && displayPackages.length === 0;
 
   const renderPackageCard = (pkg: PackageType) => {
+    const purchaseHandler = isTwaMode ? handleGooglePlayPurchase : handleStripePurchase;
     const finalPrice = pkg.price.toFixed(2);
     const pricePerImage = pkg.images > 0 ? (pkg.price / pkg.images).toFixed(2) : '0.00';
 
     return (
-      <Card key={pkg.id} className={`relative text-left p-8 flex flex-col items-center text-center ${pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : ''}`}>
+      <Card
+        key={pkg.id}
+        className={`relative text-left p-8 flex flex-col items-center text-center ${
+          pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : ''
+        }`}
+      >
         {pkg.is_most_popular && (
           <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
             <Badge className="bg-primary text-white py-1 px-3">Mais Popular</Badge>
@@ -164,7 +181,9 @@ export default function Pricing() {
           {pkg.images} imagens {pkg.type !== 'avulso' ? 'por mês' : ''}
         </p>
         <p className="text-4xl font-bold text-primary mb-1">R$ {finalPrice.replace('.', ',')}</p>
-        <p className="text-sm text-gray-600 mb-6">(R$ {pricePerImage.replace('.', ',')} por imagem)</p>
+        <p className="text-sm text-gray-600 mb-6">
+          (R$ {pricePerImage.replace('.', ',')} por imagem)
+        </p>
         <ul className="space-y-3 text-sm text-gray-800 text-left w-full mb-8 flex-grow">
           {pkg.description?.split('\n').map((item, index) => (
             <li key={index} className="flex items-center space-x-2">
@@ -173,8 +192,16 @@ export default function Pricing() {
             </li>
           ))}
         </ul>
-        <Button onClick={() => purchaseHandler(pkg)} className="w-full bg-gradient-pricing text-white" disabled={isPurchasingId === pkg.id}>
-          {isPurchasingId === pkg.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Comprar Agora'}
+        <Button
+          onClick={() => purchaseHandler(pkg)}
+          className="w-full bg-gradient-pricing text-white"
+          disabled={isPurchasingId === pkg.id}
+        >
+          {isPurchasingId === pkg.id ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            'Comprar Agora'
+          )}
         </Button>
       </Card>
     );
@@ -187,34 +214,56 @@ export default function Pricing() {
         <h1 className="text-4xl font-bold mb-4">Escolha o pacote ideal para você</h1>
         <p className="text-lg text-gray-600 mb-12">Preços justos para qualquer necessidade.</p>
 
-        <Tabs defaultValue={firstAvailableTab} className="w-full">
-          <TabsList className="mx-auto mb-8">
-            {avulsoPackages.length > 0 && <TabsTrigger value="avulso">Pacotes Avulsos</TabsTrigger>}
-            {!usingPlay && mensalPackages.length > 0 && <TabsTrigger value="mensal">Planos Mensais</TabsTrigger>}
-            {!usingPlay && profissionalPackages.length > 0 && <TabsTrigger value="profissional">Planos Profissionais</TabsTrigger>}
-          </TabsList>
+        {showPlayBillingFallback && (
+          <div className="max-w-xl mx-auto mb-10 p-4 rounded-lg border bg-amber-50 text-amber-900">
+            <p className="text-sm">
+              Pagamentos do Google Play não estão disponíveis neste dispositivo/ambiente. Tente abrir
+              novamente o app instalado pela Play Store. Se o problema persistir, entre em contato com o
+              suporte.
+            </p>
+            {playError && <p className="text-xs mt-2 opacity-80">Detalhe técnico: {playError}</p>}
+          </div>
+        )}
 
-          <TabsContent value="avulso">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-              {avulsoPackages.map(renderPackageCard)}
-            </div>
-          </TabsContent>
+        {firstAvailableTab ? (
+          <Tabs defaultValue={firstAvailableTab} className="w-full">
+            <TabsList className="mx-auto mb-8">
+              {avulsoPackages.length > 0 && <TabsTrigger value="avulso">Pacotes Avulsos</TabsTrigger>}
+              {!isTwaMode && mensalPackages.length > 0 && (
+                <TabsTrigger value="mensal">Planos Mensais</TabsTrigger>
+              )}
+              {!isTwaMode && profissionalPackages.length > 0 && (
+                <TabsTrigger value="profissional">Planos Profissionais</TabsTrigger>
+              )}
+            </TabsList>
 
-          {!usingPlay && (
-            <>
-              <TabsContent value="mensal">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-                  {mensalPackages.map(renderPackageCard)}
-                </div>
-              </TabsContent>
-              <TabsContent value="profissional">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
-                  {profissionalPackages.map(renderPackageCard)}
-                </div>
-              </TabsContent>
-            </>
-          )}
-        </Tabs>
+            <TabsContent value="avulso">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                {avulsoPackages.map(renderPackageCard)}
+              </div>
+            </TabsContent>
+
+            {!isTwaMode && (
+              <>
+                <TabsContent value="mensal">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                    {mensalPackages.map(renderPackageCard)}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="profissional">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+                    {profissionalPackages.map(renderPackageCard)}
+                  </div>
+                </TabsContent>
+              </>
+            )}
+          </Tabs>
+        ) : (
+          <p className="text-gray-600 col-span-3 text-center py-10">
+            Nenhum pacote disponível no momento.
+          </p>
+        )}
       </div>
       <Footer />
     </div>
