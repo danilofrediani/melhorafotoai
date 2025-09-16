@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
 import { useIsTwa } from '@/hooks/useIsTwa';
-import { usePlayBilling, type PlayProduct } from '@/hooks/usePlayBilling';
+import usePlayBilling, { type PlayProduct } from '@/hooks/usePlayBilling';
 
 // ======================================================
 // CONFIG DE DEBUG / TESTE
@@ -57,7 +57,7 @@ export default function Pricing() {
     error: hookError,
   } = usePlayBilling({ productIds: [...PLAY_SKUS], forceStatic: FORCE_PLAY_STATIC });
 
-
+  // Carrega pacotes (Stripe ou TWA)
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -80,6 +80,25 @@ export default function Pricing() {
           });
           setDisplayPackages(transformed);
           setLoading(false);
+          return;
+        }
+
+        // Caso TWA real — tenta carregar produtos via DigitalGoods/PaymentRequest
+        if (!FORCE_PLAY_STATIC && playStoreService === null && !isPlayBillingLoading && !isPlayAvailable) {
+          // fallback: vazio (mensagem aparece)
+          setDisplayPackages([]);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          // força loadProducts com os SKUs que queremos
+          await loadProducts([...PLAY_SKUS]);
+          // produtos serão atualizados via outro effect (googlePlayProducts)
+        } catch (err) {
+          console.warn('Erro ao carregar produtos do Play:', err);
+        } finally {
+          setLoading(false);
         }
       } else {
         try {
@@ -93,28 +112,27 @@ export default function Pricing() {
       }
     };
     loadData();
-  }, [isTwaMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTwaMode, playStoreService]);
 
+  // Quando Google Play fornece produtos via hook
   useEffect(() => {
-    if (isTwaMode && !FORCE_PLAY_STATIC && isPlayAvailable) {
-      if (googlePlayProducts.length > 0) {
-        const transformed = googlePlayProducts.map((p: PlayProduct) => ({
-          id: p.itemId,
-          name: (p.title || p.itemId).replace(/\s*\(.*?\)\s*$/, ''),
-          price: parseFloat(String(p.price?.value ?? '0')),
-          images: googlePlayProductMap[p.itemId]?.images || 0,
-          type: 'avulso',
-          description: googlePlayProductMap[p.itemId]?.description || '',
-          is_most_popular: !!googlePlayProductMap[p.itemId]?.is_most_popular,
-          created_at: new Date().toISOString(),
-          is_active: true,
-          google_play_sku: p.itemId,
-        })) as PackageType[];
-        setDisplayPackages(transformed);
-      }
+    if (isTwaMode && !FORCE_PLAY_STATIC && googlePlayProducts.length > 0 && isPlayAvailable) {
+      const transformed = googlePlayProducts.map((p: PlayProduct) => ({
+        id: p.itemId,
+        name: (p.title || p.itemId).replace(/\s*\(.*?\)\s*$/, ''),
+        price: parseFloat(String(p.price?.value ?? '0')),
+        images: googlePlayProductMap[p.itemId]?.images || 0,
+        type: 'avulso',
+        description: googlePlayProductMap[p.itemId]?.description || '',
+        is_most_popular: !!googlePlayProductMap[p.itemId]?.is_most_popular,
+        created_at: new Date().toISOString(),
+        is_active: true,
+        google_play_sku: p.itemId,
+      })) as PackageType[];
+      setDisplayPackages(transformed);
     }
   }, [isTwaMode, googlePlayProducts, isPlayAvailable]);
-
 
   const handleStripePurchase = async (pkg: PackageType) => {
     if (!profile) {
@@ -140,7 +158,7 @@ export default function Pricing() {
       toast.info('Você precisa estar logado para comprar.');
       navigate('/login'); return;
     }
-    
+
     const skuToSend = pkg.google_play_sku || pkg.id;
     if (!skuToSend || !PLAY_SKUS.includes(skuToSend as any)) {
       toast.error("Este pacote não está configurado para compra no app. Contate o suporte.");
@@ -153,7 +171,7 @@ export default function Pricing() {
         console.log(`%cMODO DE SIMULAÇÃO ATIVO PARA SKU: ${skuToSend}`, 'color: #f59e0b; font-weight: bold;');
         toast.info("Simulando compra aprovada...");
         const fakePurchaseToken = `FAKE_PURCHASE_TOKEN_${new Date().getTime()}`;
-        
+
         const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
           body: { sku: skuToSend, purchaseToken: fakePurchaseToken },
         });
@@ -161,20 +179,17 @@ export default function Pricing() {
         if (error || data?.error) {
           throw new Error(error?.message || data?.error || 'A simulação falhou na validação do back-end.');
         }
-        
+
         toast.success(`Simulação bem-sucedida! ${data.creditsAdded} créditos foram adicionados.`);
-        
-        // --- ✅ AJUSTE FINAL DE UX ✅ ---
         await refreshProfile?.();
         navigate('/dashboard');
-        // --- FIM DO AJUSTE ---
 
       } else {
-        // --- FLUXO DE PRODUÇÃO NORMAL ---
+        // fluxo normal
         if (!playStoreService) throw new Error('Pagamento do Google Play indisponível.');
-        
+
         const result = await playPurchase(skuToSend);
-        
+
         if (result.ok && result.purchaseToken) {
           toast.info('Compra aprovada no Google Play. Validando e adicionando créditos...');
           const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
@@ -182,17 +197,17 @@ export default function Pricing() {
           });
 
           if (error || data?.error) throw new Error(error?.message || data?.error || 'Falha na validação do token.');
-          
+
           toast.success('Créditos adicionados com sucesso!');
-          
-          // --- ✅ AJUSTE FINAL DE UX ✅ ---
           await refreshProfile?.();
           navigate('/dashboard');
-          // --- FIM DO AJUSTE ---
 
-        } else if (!result.ok) {
-          // O hook já trata o erro de cancelamento, não precisamos fazer nada aqui
-          console.log("Compra cancelada ou falhou sem token.");
+        } else if (result.ok && !result.purchaseToken) {
+          // Cuidado: em alguns hosts PaymentRequest finaliza sem token. Devemos avisar e pedir suporte.
+          throw new Error(result.message || 'Compra aprovada, mas nenhum purchaseToken foi retornado pelo host. Verifique ambiente TWA/Play.');
+        } else {
+          // result.ok === false: cancelado ou falha
+          console.log("Compra cancelada ou falhou:", result.message);
         }
       }
     } catch (err: any) {
@@ -209,7 +224,7 @@ export default function Pricing() {
   const avulsoPackages = useMemo(() => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.price - b.price), [displayPackages]);
   const mensalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'mensal').sort((a, b) => a.price - b.price), [displayPackages]);
   const profissionalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'profissional').sort((a, b) => a.price - b.price), [displayPackages]);
-  
+
   const getFirstAvailableTab = () => {
     if (avulsoPackages.length > 0) return 'avulso';
     if (!isTwaMode && mensalPackages.length > 0) return 'mensal';
@@ -217,7 +232,7 @@ export default function Pricing() {
     return isTwaMode ? 'avulso' : '';
   };
   const firstAvailableTab = getFirstAvailableTab();
-  
+
   const finalLoading = loading || (isTwaMode && isPlayBillingLoading && displayPackages.length === 0 && !FORCE_PLAY_STATIC);
   if (finalLoading) {
     return ( <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div> );
@@ -249,7 +264,7 @@ export default function Pricing() {
       </Card>
     );
   };
-  
+
   return (
     <div className="min-h-screen bg-white">
       <Header />
@@ -301,3 +316,4 @@ export default function Pricing() {
     </div>
   );
 }
+
