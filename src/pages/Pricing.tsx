@@ -112,31 +112,30 @@ export default function Pricing() {
   // APP/TWA -> Google Play Billing (carrega produtos reais)
   // ======================================================
   useEffect(() => {
-    const loadPlayProducts = async () => {
-      if (!isTwaMode) return;
-      if (isPlayBillingLoading) return;
+  const loadPlayProducts = async () => {
+    if (!isTwaMode) return;
+    if (isPlayBillingLoading) return;
+    if (FORCE_PLAY_STATIC) return;
+    if (!isPlayAvailable) {
+      setDisplayPackages([]);
+      return;
+    }
 
-      // Em modo estático não chamamos getDetails (evita o erro @@iterator)
-      if (FORCE_PLAY_STATIC) {
-        return;
-      }
+    // <-- GUARD: se já carregamos produtos do Play, não pede de novo
+    if (googlePlayProducts && googlePlayProducts.length > 0) return;
 
-      if (!isPlayAvailable) {
-        setDisplayPackages([]);
-        return;
-      }
+    setLoading(true);
+    try {
+      await loadProducts([...PLAY_SKUS]);
+    } catch (e: any) {
+      setPlayError(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  loadPlayProducts();
+}, [isTwaMode, isPlayBillingLoading, isPlayAvailable, loadProducts, googlePlayProducts]);
 
-      setLoading(true);
-      try {
-        await loadProducts([...PLAY_SKUS]);
-      } catch (e: any) {
-        setPlayError(e?.message || String(e));
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadPlayProducts();
-  }, [isTwaMode, isPlayBillingLoading, isPlayAvailable, loadProducts]);
 
   // ======================================================
   // Converte produtos do Play em “packages” para a UI
