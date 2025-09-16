@@ -56,6 +56,7 @@ export interface Package {
   is_most_popular?: boolean;
   created_at: string;
   updated_at: string;
+  google_play_sku?: string; // <-- ✅ CAMPO ADICIONADO AQUI
 }
 
 export interface Transaction {

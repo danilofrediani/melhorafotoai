@@ -21,14 +21,8 @@ import { usePlayBilling, type PlayProduct } from '@/hooks/usePlayBilling';
 // CONFIG DE DEBUG / TESTE
 // ======================================================
 const DEBUG_BOX = true;
-
-// ✅ NOSSA NOVA FLAG DE SIMULAÇÃO ✅
-// Deixe `true` para testar o fluxo de back-end sem uma compra real.
-// Mude para `false` para o teste final com dinheiro real e estorno.
 const SIMULATE_PURCHASE = true;
-
 const FORCE_PLAY_STATIC = SIMULATE_PURCHASE || import.meta.env.VITE_FORCE_PLAY_STATIC === 'true' || new URLSearchParams(location.search).get('play') === 'static';
-
 const STATIC_TEST_SKU = 'android.test.purchased';
 const PLAY_SKUS = ['credits_10', 'credits_20', 'credits_50'] as const;
 
@@ -50,7 +44,7 @@ export default function Pricing() {
   const [isPurchasingId, setIsPurchasingId] = useState<string | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
 
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth(); // Adicionado refreshProfile
   const navigate = useNavigate();
   const isTwaMode = useIsTwa();
   const {
@@ -58,80 +52,71 @@ export default function Pricing() {
     products: googlePlayProducts,
     loadProducts,
     purchase: playPurchase,
-    listPurchases,
     isLoading: isPlayBillingLoading,
     isAvailable: isPlayAvailable,
     error: hookError,
-  } = usePlayBilling(isTwaMode);
+  } = usePlayBilling({ productIds: [...PLAY_SKUS], forceStatic: FORCE_PLAY_STATIC });
+
 
   useEffect(() => {
-    const loadWebPackages = async () => {
-      if (isTwaMode) { setLoading(false); return; }
+    const loadData = async () => {
       setLoading(true);
-      try {
-        const stripeData = await packageService.getActivePackages();
-        setDisplayPackages(stripeData || []);
-      } catch {
-        toast.error('Não foi possível carregar os planos.');
-      } finally {
-        setLoading(false);
+      if (isTwaMode) {
+        if (FORCE_PLAY_STATIC) {
+          const transformed = PLAY_SKUS.map((sku) => {
+            const meta = googlePlayProductMap[sku] || {};
+            return {
+              id: sku,
+              name: `${meta.images ?? ''} Imagens (Teste)`,
+              price: 0, // Preço zero para teste
+              images: meta.images || 0,
+              type: 'avulso',
+              description: meta.description || '',
+              is_most_popular: !!meta.is_most_popular,
+              created_at: new Date().toISOString(),
+              is_active: true,
+              google_play_sku: sku,
+            } as PackageType;
+          });
+          setDisplayPackages(transformed);
+          setLoading(false);
+        }
+        // A busca real de produtos do Google já é tratada no useEffect abaixo
+      } else {
+        try {
+          const stripeData = await packageService.getActivePackages();
+          setDisplayPackages(stripeData || []);
+        } catch {
+          toast.error('Não foi possível carregar os planos.');
+        } finally {
+          setLoading(false);
+        }
       }
     };
-    loadWebPackages();
+    loadData();
   }, [isTwaMode]);
 
   useEffect(() => {
-    const loadPlayProducts = async () => {
-      if (!isTwaMode || isPlayBillingLoading || FORCE_PLAY_STATIC || !isPlayAvailable) return;
-      if (googlePlayProducts && googlePlayProducts.length > 0) return;
-      setLoading(true);
-      try {
-        await loadProducts([...PLAY_SKUS]);
-      } catch (e: any) {
-        setPlayError(e?.message || String(e));
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadPlayProducts();
-  }, [isTwaMode, isPlayBillingLoading, isPlayAvailable, loadProducts, googlePlayProducts]);
-
-  useEffect(() => {
-    if (!isTwaMode) return;
-    if (FORCE_PLAY_STATIC) {
-      const transformed = (PLAY_SKUS as readonly string[]).map((sku) => {
-        const meta = googlePlayProductMap[sku] || {};
-        return {
-          id: sku,
-          name: `${meta.images ?? ''} Imagens`, // Nome mais claro para modo estático
-          price: meta.images || 0, // Preço simbólico para exibição
-          images: meta.images || 0,
+    if (isTwaMode && !FORCE_PLAY_STATIC && isPlayAvailable) {
+      if (googlePlayProducts.length > 0) {
+        const transformed = googlePlayProducts.map((p: PlayProduct) => ({
+          id: p.itemId,
+          name: (p.title || p.itemId).replace(/\s*\(.*?\)\s*$/, ''),
+          price: parseFloat(String(p.price?.value ?? '0')),
+          images: googlePlayProductMap[p.itemId]?.images || 0,
           type: 'avulso',
-          description: meta.description || '',
-          is_most_popular: !!meta.is_most_popular,
+          description: googlePlayProductMap[p.itemId]?.description || '',
+          is_most_popular: !!googlePlayProductMap[p.itemId]?.is_most_popular,
           created_at: new Date().toISOString(),
           is_active: true,
-        } as PackageType;
-      });
-      setDisplayPackages(transformed);
-      setLoading(false); // Garante que o loading para no modo estático
-      return;
+          google_play_sku: p.itemId,
+        })) as PackageType[];
+        setDisplayPackages(transformed);
+      }
     }
-    if (!googlePlayProducts || googlePlayProducts.length === 0) return;
-    const transformed = googlePlayProducts.map((p: PlayProduct) => ({
-      id: p.itemId,
-      name: (p.title || p.itemId).replace(/\s*\(.*?\)\s*$/, ''),
-      price: parseFloat(String(p.price?.value ?? '0')),
-      images: googlePlayProductMap[p.itemId]?.images || 0,
-      type: 'avulso',
-      description: googlePlayProductMap[p.itemId]?.description || '',
-      is_most_popular: !!googlePlayProductMap[p.itemId]?.is_most_popular,
-      created_at: new Date().toISOString(),
-      is_active: true,
-    })) as PackageType[];
-    setDisplayPackages(transformed);
-  }, [isTwaMode, googlePlayProducts]);
-  
+  }, [isTwaMode, googlePlayProducts, isPlayAvailable]);
+
+
   const handleStripePurchase = async (pkg: PackageType) => {
     if (!profile) {
       localStorage.setItem('pendingPurchasePackageId', pkg.id);
@@ -145,65 +130,55 @@ export default function Pricing() {
       else throw new Error('URL de checkout não recebida.');
     } catch (err: any) {
       toast.error(`Falha: ${err.message}`);
+    } finally {
       setIsPurchasingId(null);
     }
   };
-  
-  // ======================================================
-  // Google Play (TWA) - FUNÇÃO ATUALIZADA
-  // ======================================================
+
   const handleGooglePlayPurchase = async (pkg: PackageType) => {
     setPlayError(null);
     if (!profile) {
       toast.info('Você precisa estar logado para comprar.');
       navigate('/login'); return;
     }
+    
+    // ✅ CORREÇÃO CRÍTICA: Usa o SKU correto do Google, seja no modo de teste ou real.
+    const skuToSend = pkg.google_play_sku || pkg.id;
 
     setIsPurchasingId(pkg.id);
     try {
-      // --- LÓGICA DO MODO DE SIMULAÇÃO ---
       if (SIMULATE_PURCHASE) {
-        console.log(`%cMODO DE SIMULAÇÃO ATIVO PARA SKU: ${pkg.id}`, 'color: #f59e0b; font-weight: bold;');
+        console.log(`%cMODO DE SIMULAÇÃO ATIVO PARA SKU: ${skuToSend}`, 'color: #f59e0b; font-weight: bold;');
         toast.info("Simulando compra aprovada...");
-
         const fakePurchaseToken = `FAKE_PURCHASE_TOKEN_${new Date().getTime()}`;
         
         const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
-          body: { sku: pkg.id, purchaseToken: fakePurchaseToken },
+          body: { sku: skuToSend, purchaseToken: fakePurchaseToken },
         });
 
-        if (error || data?.error) {
-          throw new Error(error?.message || data?.error || 'A simulação falhou na validação do back-end.');
-        }
-
+        if (error || data?.error) throw new Error(error?.message || data?.error || 'A simulação falhou na validação do back-end.');
+        
         toast.success(`Simulação bem-sucedida! ${data.creditsAdded} créditos foram adicionados.`);
+        await refreshProfile?.(); // Atualiza o perfil do usuário para mostrar os novos créditos
 
       } else {
         // --- FLUXO DE PRODUÇÃO NORMAL ---
-        if (!playStoreService) {
-          throw new Error('Pagamento do Google Play indisponível.');
-        }
-
-        const result = await playPurchase(pkg.id); // O hook 'buy' agora retorna {ok, purchaseToken}
+        if (!playStoreService) throw new Error('Pagamento do Google Play indisponível.');
+        
+        const result = await playPurchase(skuToSend);
         
         if (result.ok && result.purchaseToken) {
-          toast.success('Compra aprovada no Google Play. Validando e adicionando créditos...');
-
+          toast.info('Compra aprovada no Google Play. Validando e adicionando créditos...');
           const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
-            body: { sku: pkg.id, purchaseToken: result.purchaseToken },
+            body: { sku: skuToSend, purchaseToken: result.purchaseToken },
           });
 
           if (error || data?.error) throw new Error(error?.message || data?.error || 'Falha na validação do token.');
           
-          toast.success(`Créditos adicionados com sucesso!`);
-        } else {
-          // Se o resultado não for ok, o hook já trata o erro de cancelamento.
-          // Lançamos um erro genérico se algo mais der errado.
-          if (result.ok === false && !result.purchaseToken) {
-             console.log("Compra cancelada ou falhou sem token.");
-          } else {
-            throw new Error("Ocorreu um problema inesperado na compra.");
-          }
+          toast.success('Créditos adicionados com sucesso!');
+          await refreshProfile?.(); // Atualiza o perfil do usuário
+        } else if (!result.ok) {
+          throw new Error("Compra cancelada ou falhou.");
         }
       }
     } catch (err: any) {
@@ -217,7 +192,6 @@ export default function Pricing() {
     }
   };
 
-  // Resto do componente (filtragem e renderização) sem alterações...
   const avulsoPackages = useMemo(() => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.price - b.price), [displayPackages]);
   const mensalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'mensal').sort((a, b) => a.price - b.price), [displayPackages]);
   const profissionalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'profissional').sort((a, b) => a.price - b.price), [displayPackages]);
@@ -239,16 +213,16 @@ export default function Pricing() {
 
   const renderPackageCard = (pkg: PackageType) => {
     const purchaseHandler = isTwaMode ? handleGooglePlayPurchase : handleStripePurchase;
-    const finalPrice = pkg.price.toFixed(2);
-    const pricePerImage = pkg.images > 0 ? (pkg.price / pkg.images).toFixed(2) : '0.00';
+    const finalPrice = isTwaMode && SIMULATE_PURCHASE ? "0,00" : pkg.price.toFixed(2).replace('.', ',');
+    const pricePerImage = pkg.images > 0 ? (pkg.price / pkg.images).toFixed(2).replace('.', ',') : '0,00';
     return (
       <Card key={pkg.id} className={`relative text-left p-8 flex flex-col items-center text-center ${ pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : '' }`} >
         {pkg.is_most_popular && ( <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"><Badge className="bg-primary text-white py-1 px-3">Mais Popular</Badge></div> )}
         <div className="mb-4">{getIcon(pkg.type)}</div>
         <h3 className="text-xl font-bold mb-1">{pkg.name}</h3>
         <p className="text-sm text-gray-600 mb-4">{pkg.images} imagens {pkg.type !== 'avulso' ? 'por mês' : ''}</p>
-        <p className="text-4xl font-bold text-primary mb-1">R$ {finalPrice.replace('.', ',')}</p>
-        <p className="text-sm text-gray-600 mb-6">(R$ {pricePerImage.replace('.', ',')} por imagem)</p>
+        <p className="text-4xl font-bold text-primary mb-1">R$ {finalPrice}</p>
+        <p className="text-sm text-gray-600 mb-6">(R$ {pricePerImage} por imagem)</p>
         <ul className="space-y-3 text-sm text-gray-800 text-left w-full mb-8 flex-grow">
           {pkg.description?.split('\n').map((item, index) => (
             <li key={index} className="flex items-center space-x-2"><Check className="w-4 h-4 text-green-500 flex-shrink-0" /><span>{item}</span></li>
@@ -276,7 +250,7 @@ export default function Pricing() {
                 <span className="px-2 py-1 rounded bg-slate-200">playAvailable: {String(isPlayAvailable)}</span>
                 <span className="px-2 py-1 rounded bg-slate-200">playLoading: {String(isPlayBillingLoading)}</span>
                 <span className="px-2 py-1 rounded bg-slate-200">packages: {displayPackages.length}</span>
-                <span className="px-2 py-1 rounded bg-slate-200">FORCE_PLAY_STATIC: {String(FORCE_PLAY_STATIC)}</span>
+                <span className="px-2 py-1 rounded bg-slate-200">SIMULATE_PURCHASE: {String(SIMULATE_PURCHASE)}</span>
               </div>
               {(hookError || playError) && (
                 <div className="mt-2 text-red-700 text-sm"><strong>Erro:</strong> {hookError || playError}</div>
