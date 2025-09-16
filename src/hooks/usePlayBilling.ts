@@ -1,245 +1,144 @@
 // src/hooks/usePlayBilling.ts
-import { useCallback, useEffect, useRef, useState } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-type DGPrice = { value: string; currency: string };
-type DGDetail = { itemId: string; title?: string; price?: DGPrice; description?: string };
-type DGPurchase = { itemId: string; purchaseToken: string; state?: string };
-
+type PlayPrice = { value: string; currency: string };
 export type PlayProduct = {
-  itemId: string;
-  title: string;
-  price: DGPrice;
-  description?: string;
+  itemId: string;        // SKU do Play (ex.: credits_10)
+  title: string;         // Título configurado no Play
+  price: PlayPrice;      // valor+moeda (string)
 };
 
-type HookReturn = {
+type UsePlayBillingReturn = {
   playStoreService: any | null;
   products: PlayProduct[];
-  loadProducts: (skus: string[]) => Promise<void>;
-  purchase: (sku: string) => Promise<string | null>;
+  loadProducts: (ids: string[]) => Promise<void>;
+  purchase: (sku: string) => Promise<void>;
+  listPurchases: () => Promise<any[]>;
   isLoading: boolean;
   isAvailable: boolean;
   error: string | null;
 };
 
-const PLAY_METHOD = 'https://play.google.com/billing';
-
-// Atalho de console com prefixo
-const log = (...args: any[]) => console.log('[DG]', ...args);
-const logPR = (...args: any[]) => console.log('[PR]', ...args);
-
-// ⚠️ Durante os testes, podemos consumir automaticamente uma compra antiga do mesmo SKU
-// para evitar o erro “item already owned”. Em produção, isso deve ser feito só
-// após validação/entrega no backend.
-const DEBUG_AUTOCONSUME = true;
-
-export default function usePlayBilling(isTwa: boolean): HookReturn {
+function usePlayBilling(isEnabled: boolean): UsePlayBillingReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [isAvailable, setIsAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [products, setProducts] = useState<PlayProduct[]>([]);
-  const serviceRef = useRef<any | null>(null);
+  const dgRef = useRef<any | null>(null);
 
-  // Init básico
+  // Inicializa Digital Goods Service (somente se habilitado/TWA)
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const init = async () => {
+      if (!isEnabled) {
+        setIsAvailable(false);
+        dgRef.current = null;
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
       try {
-        setError(null);
-        if (!isTwa) { setIsAvailable(false); return; }
-
-        const hasDG = typeof (window as any).getDigitalGoodsService === 'function';
-        const hasPR = typeof (window as any).PaymentRequest === 'function';
-        log('env', { isTwa, hasDG, hasPR });
-
-        if (!hasDG || !hasPR) { setIsAvailable(false); return; }
-
-        if (!serviceRef.current) {
-          try {
-            const svc = await (window as any).getDigitalGoodsService(PLAY_METHOD);
-            log('getDigitalGoodsService =>', !!svc);
-            if (!cancelled) serviceRef.current = svc ?? null;
-          } catch (e: any) {
-            log('getDigitalGoodsService error', e?.name, e?.message);
-          }
-        }
-        if (!cancelled) setIsAvailable(true);
+        const svc = await (window as any).getDigitalGoodsService?.('https://play.google.com/billing');
+        if (!svc) throw new Error('DigitalGoodsService indisponível');
+        if (cancelled) return;
+        dgRef.current = svc;
+        setIsAvailable(true);
       } catch (e: any) {
         if (!cancelled) {
-          setError(e?.message ?? 'Falha ao inicializar Play Billing');
+          setError(e?.message || String(e));
           setIsAvailable(false);
+          dgRef.current = null;
         }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    })();
+    };
+    init();
     return () => { cancelled = true; };
-  }, [isTwa]);
+  }, [isEnabled]);
 
-  const ensureService = useCallback(async () => {
-    if (serviceRef.current) return serviceRef.current;
-    const svc = await (window as any).getDigitalGoodsService(PLAY_METHOD);
-    serviceRef.current = svc ?? null;
-    return serviceRef.current;
-  }, []);
-
-  const loadProducts = useCallback(async (skus: string[]) => {
-    if (!isTwa) return;
+  const loadProducts = useCallback(async (ids: string[]) => {
+    if (!dgRef.current) return;
     setIsLoading(true);
     setError(null);
     try {
-      const svc = await ensureService();
-      if (!svc) throw new Error('Serviço do Google Play indisponível.');
-
-      const details: DGDetail[] = await svc.getDetails(skus);
-      log('getDetails', details);
-
-      const normalized: PlayProduct[] = (details || []).map((d) => ({
+      console.debug('TwaBilling.DG: Calling getDetails for', ids.join(', '));
+      const details = await dgRef.current.getDetails({ itemIds: ids });
+      console.debug('TwaBilling.DG: GetDetails returned:', 0);
+      const mapped: PlayProduct[] = (details || []).map((d: any) => ({
         itemId: d.itemId,
-        title: (d.title || d.itemId).replace(/\s*\(.*?\)\s*$/, ''),
-        price: d.price ?? { value: '0', currency: 'BRL' },
-        description: d.description,
+        title: d.title ?? d.itemId,
+        price: {
+          value: String(d.price?.value ?? '0'),
+          currency: d.price?.currency ?? 'BRL',
+        },
       }));
-      setProducts(normalized);
+      setProducts(mapped);
     } catch (e: any) {
-      setError(e?.message ?? 'Não foi possível carregar os produtos.');
-      setProducts([]);
+      setError(e?.message || String(e));
     } finally {
       setIsLoading(false);
     }
-  }, [ensureService, isTwa]);
+  }, []);
 
-  // Pré-voo: checa capacidade, instrumento e compras existentes
-  const preflight = useCallback(async (request: any, sku: string, svc: any) => {
+  const listPurchases = useCallback(async () => {
+    if (!dgRef.current) return [];
     try {
-      if (typeof request.canMakePayment === 'function') {
-        const can = await request.canMakePayment();
-        logPR('canMakePayment =>', can);
-        if (!can) throw new Error('clientAppUnavailable');
-      }
-      if (typeof request.hasEnrolledInstrument === 'function') {
-        try {
-          const has = await request.hasEnrolledInstrument();
-          logPR('hasEnrolledInstrument =>', has);
-          // Se false, normalmente o Play fecha o fluxo ou mostra método de teste só se a conta for testadora
-        } catch (e: any) {
-          logPR('hasEnrolledInstrument error =>', e?.name, e?.message);
-        }
-      }
-    } catch (e: any) {
-      throw e; // propaga para exibirmos no playError
-    }
-
-    // Lista compras existentes (pode estar “PURCHASED” não consumida)
-    try {
-      const purchases: DGPurchase[] = await svc.listPurchases();
-      log('listPurchases (before)', purchases);
-
-      const sameSku = purchases?.filter(p => p.itemId === sku) || [];
-      if (sameSku.length) {
-        log('existing purchases for sku', sku, sameSku);
-        // Para testes, consome automaticamente para liberar nova compra
-        if (DEBUG_AUTOCONSUME) {
-          for (const p of sameSku) {
-            if (p.purchaseToken) {
-              try {
-                log('consume start', p.purchaseToken);
-                await svc.consume(p.purchaseToken);
-                log('consume ok', p.purchaseToken);
-              } catch (e: any) {
-                log('consume error', e?.name, e?.message);
-              }
-            }
-          }
-        }
-      }
-    } catch (e: any) {
-      log('listPurchases error', e?.name, e?.message);
+      console.debug('TwaBilling.DG: Calling listPurchases');
+      const res = await dgRef.current.listPurchases();
+      console.debug('TwaBilling.DG: ListPurchases returned:', 0);
+      return res || [];
+    } catch (e) {
+      console.error('TwaBilling.DG: listPurchases error', e);
+      return [];
     }
   }, []);
 
   const purchase = useCallback(async (sku: string) => {
     setError(null);
     try {
-      if (!isTwa) throw new Error('Compra disponível apenas dentro do app da Play.');
-      if (!isAvailable) throw new Error('Play Billing indisponível neste dispositivo.');
-
-      const svc = await ensureService();
-      if (!svc) throw new Error('Serviço do Google Play indisponível.');
-
-      // Busca detail para preencher total (alguns aparelhos exigem fields válidos)
-      let price: DGPrice = { value: '0', currency: 'BRL' };
-      let title = sku;
-      try {
-        const [detail] = await svc.getDetails([sku]);
-        if (detail?.price?.value) price = detail.price!;
-        if (detail?.title) title = (detail.title as string).replace(/\s*\(.*?\)\s*$/, '');
-      } catch {/* segue */}
-
-      const method: PaymentMethodData = {
-        supportedMethods: PLAY_METHOD,
+      // Payment Request via método do Play
+      const methodData = [{
+        supportedMethods: 'https://play.google.com/billing',
         data: { sku },
-      } as any;
-
-      const details: PaymentDetailsInit = {
-        total: { label: title, amount: { currency: price.currency || 'BRL', value: String(price.value || '0') } },
+      }];
+      // Detalhes "dummy" — o Play ignora total; o SKU decide tudo.
+      const details = {
+        total: { label: 'Total', amount: { currency: 'BRL', value: '0.00' } },
       };
+      const pr = new (window as any).PaymentRequest(methodData, details);
 
-      const request = new (window as any).PaymentRequest([method], details);
-
-      // Pré-voo (capacidade, instrumento e compras existentes)
-      await preflight(request, sku, svc);
-
-      // Abre o sheet
-      let response: PaymentResponse | null = null;
-      try {
-        response = await request.show();
-      } catch (err: any) {
-        // Aqui pegamos a causa real do fechamento
-        const name = err?.name || 'AbortError';
-        const msg = err?.message || String(err);
-        setError(`${name}: ${msg}`);
-        logPR('show() error =>', name, msg, err);
-        return null;
+      const canPay = await pr.canMakePayment?.().catch(() => true);
+      if (canPay === false) {
+        throw new Error('Pagamento não disponível neste dispositivo');
       }
 
-      // Extrai token
-      try {
-        try {
-          logPR('details =', JSON.stringify((response as any)?.details || {}));
-        } catch {
-          logPR('details (raw) =', (response as any)?.details);
-        }
-        const d: any = (response as any)?.details || {};
-        const token =
-          d.purchaseToken ||
-          d.token ||
-          d.purchase_token ||
-          d.purchase?.purchaseToken ||
-          null;
-
-        await response.complete('success');
-        if (!token) {
-          setError('Token de compra não retornado.');
-          return null;
-        }
-        return String(token);
-      } catch (err: any) {
-        setError(err?.message ?? 'Falha ao finalizar a compra.');
-        return null;
+      console.debug('TwaBilling.P: Payment flow launch');
+      const resp = await pr.show(); // Abre sheet Play
+      await resp?.complete?.('success'); // Sinaliza conclusão para o browser
+    } catch (e: any) {
+      // Exemplo de erro comum: “Play Billing returned did not find SKU.”
+      if (e && e.message) {
+        console.warn('PaymentRequest error:', e.message);
       }
-    } catch (err: any) {
-      setError(err?.message ?? 'Ocorreu um erro durante a compra.');
-      return null;
+      throw e;
     }
-  }, [ensureService, isAvailable, isTwa, preflight]);
+  }, []);
 
-  return {
-    playStoreService: serviceRef.current,
+  return useMemo(() => ({
+    playStoreService: dgRef.current,
     products,
     loadProducts,
     purchase,
+    listPurchases,
     isLoading,
     isAvailable,
     error,
-  };
+  }), [products, loadProducts, purchase, listPurchases, isLoading, isAvailable, error]);
 }
+
+export { usePlayBilling };
+export default usePlayBilling;
+export type { UsePlayBillingReturn };
 

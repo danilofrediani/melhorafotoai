@@ -2,39 +2,19 @@
 import { useEffect, useState } from 'react';
 
 /**
- * Detecção robusta de TWA:
- * - referrer android-app://... (vínculo TWA)
- * - display-mode: standalone (Chrome/Android)
- * - sem token de WebView (; wv)
- * - fallback para possíveis bridges
+ * Detecta se estamos rodando dentro de um TWA (Android)
+ * de forma conservadora, verificando a presença do
+ * Digital Goods Service do Google Play.
  */
-export default function useIsTwa(): boolean {
+function useIsTwa() {
   const [isTwa, setIsTwa] = useState(false);
 
   useEffect(() => {
     try {
-      const ua = navigator.userAgent || '';
-      const isAndroid = /Android/i.test(ua);
-      const isChrome = /Chrome\/\d+/i.test(ua);
-      const isWebView = /; wv\)/i.test(ua); // WebView costuma ter ; wv
-      const ref = document.referrer || '';
-      const refIsAndroidApp = ref.startsWith('android-app://');
-      const displayStandalone =
-        typeof window.matchMedia === 'function' &&
-        window.matchMedia('(display-mode: standalone)').matches;
-
-      // Alguns fabricantes expõem bridges
-      const hasBridge =
-        (window as any).__TWA_BRIDGE__ ||
-        (window as any).TrustedWebActivity ||
-        (window as any).AndroidBridge;
-
-      const detected =
-        refIsAndroidApp ||
-        (displayStandalone && isAndroid && isChrome && !isWebView) ||
-        Boolean(hasBridge);
-
-      setIsTwa(Boolean(detected));
+      const hasDG =
+        typeof window !== 'undefined' &&
+        typeof (window as any).getDigitalGoodsService === 'function';
+      setIsTwa(!!hasDG);
     } catch {
       setIsTwa(false);
     }
@@ -42,4 +22,8 @@ export default function useIsTwa(): boolean {
 
   return isTwa;
 }
+
+// Exporta das duas formas para não quebrar nenhum import
+export { useIsTwa };
+export default useIsTwa;
 
