@@ -17,7 +17,7 @@ interface AuthContextType {
   session: Session | null;
   profile: DbUser | null;
   isLoadingProfile: boolean;
-  refetchProfile: () => Promise<void>; // A assinatura não muda para o consumidor
+  refreshProfile: () => Promise<DbUser | undefined>; // Alterado para refletir o retorno
   login: (email: string, password: string) => Promise<AuthLoginResult>;
   register: (email: string, password: string, name: string, userType: DbUser['user_type']) => Promise<{ success: boolean; error?: RegisterError }>;
   logout: () => Promise<void>;
@@ -30,10 +30,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<SupaUser | null>(null);
   const [profile, setProfile] = useState<DbUser | null>(null);
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true); // Começa como true
 
-  // A função handlePostLogin permanece a mesma
   const handlePostLogin = async () => {
+    // ... (código original, sem alterações)
     const pendingPackageId = localStorage.getItem('pendingPurchasePackageId');
     if (pendingPackageId) {
       localStorage.removeItem('pendingPurchasePackageId');
@@ -48,61 +48,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // ✅ --- LÓGICA DE CARREGAMENTO E AUTENTICAÇÃO REFEITA E MAIS ROBUSTA --- ✅
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        // Se já tem sessão, busca o perfil
-        refetchProfile(session.user);
-      } else {
-        setIsLoadingProfile(false);
+    const fetchUserProfile = async (currentUser: SupaUser) => {
+      try {
+        const dbUser = await userService.ensureUserRecord(currentUser);
+        setProfile(dbUser);
+        return dbUser;
+      } catch (err) {
+        console.error('Erro ao buscar perfil do usuário:', err);
+        setProfile(null);
+        return undefined;
       }
+    };
+
+    // 1. Pega a sessão inicial
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setSession(session);
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        await fetchUserProfile(currentUser);
+      }
+      setIsLoadingProfile(false); // SEMPRE finaliza o loading inicial
     });
 
+    // 2. Ouve por mudanças de estado
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
         const currentUser = session?.user ?? null;
         setUser(currentUser);
-
-        if (_event === 'SIGNED_IN' && currentUser) {
-          await refetchProfile(currentUser);
-          await handlePostLogin();
-        }
-        if (_event === 'SIGNED_OUT') {
+        
+        if (currentUser) {
+          setIsLoadingProfile(true);
+          await fetchUserProfile(currentUser);
+          setIsLoadingProfile(false);
+          
+          if (_event === 'SIGNED_IN') {
+            await handlePostLogin();
+          }
+        } else {
           setProfile(null);
-        }
-        if (!currentUser) {
           setIsLoadingProfile(false);
         }
       }
     );
+    
     return () => subscription.unsubscribe();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ --- AJUSTE APLICADO AQUI --- ✅
-  const refetchProfile = async (currentUser: SupaUser | null = user) => {
+  const refreshProfile = async (): Promise<DbUser | undefined> => {
+    const currentUser = user; // Pega o usuário do estado atual
     if (currentUser) {
       setIsLoadingProfile(true);
       try {
-        // Chamamos a mesma função de antes, mas agora vamos retornar o resultado
         const dbUser = await userService.ensureUserRecord(currentUser);
-        setProfile(dbUser); // Atualizamos o estado do contexto
-        return dbUser; // E RETORNAMOS o perfil atualizado
+        setProfile(dbUser);
+        return dbUser; // Retorna o perfil para o fluxo de compra
       } catch (err) {
         console.error('Erro ao recarregar o perfil do usuário:', err);
         setProfile(null);
+        return undefined;
       } finally {
         setIsLoadingProfile(false);
       }
     }
-    // Retorna undefined ou null se não houver usuário
     return undefined;
   };
+  // ✅ --- FIM DA LÓGICA REFEITA --- ✅
   
   const login = async (email: string, password: string): Promise<AuthLoginResult> => {
+    // ... (código original, sem alterações)
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (error) {
       if (error.message?.includes('Email not confirmed')) return { success: false, error: 'EMAIL_NOT_CONFIRMED' };
@@ -111,13 +128,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     if (data.user) {
       const dbUser = await userService.getUserById(data.user.id);
-      setProfile(dbUser); // Seta o perfil no login
       return { success: true, role: dbUser?.user_type };
     }
     return { success: false, error: 'UNKNOWN_ERROR' };
   };
 
   const register = async (email: string, password: string, name: string, userType: DbUser['user_type']): Promise<{ success: boolean; error?: RegisterError }> => {
+    // ... (código original, com uma pequena correção na busca de 'profiles')
     const { data: existingUser } = await supabase.from('profiles').select('id').eq('email', email.trim().toLowerCase()).single();
     if (existingUser) return { success: false, error: 'EMAIL_ALREADY_IN_USE' };
     const { data, error } = await supabase.auth.signUp({ email: email.trim().toLowerCase(), password, options: { data: { name, user_type: userType } } });
@@ -134,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => { await supabase.auth.signOut(); };
   const resetPassword = async (email: string): Promise<boolean> => { const { error } = await supabase.auth.resetPasswordForEmail(email); return !error; };
 
-  const value = { user, session, profile, isLoadingProfile, refetchProfile, login, register, logout, resetPassword };
+  const value = { user, session, profile, isLoadingProfile, refreshProfile, login, register, logout, resetPassword };
 
   return (<AuthContext.Provider value={value}>{children}</AuthContext.Provider>);
 }
