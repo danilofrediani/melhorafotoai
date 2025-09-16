@@ -1,109 +1,189 @@
-import { useState, useEffect, useCallback } from 'react';
+// src/hooks/usePlayBilling.ts
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-/** Tipos da Digital Goods API (Web Play Billing) */
-interface DigitalGoodsService {
-  getDetails(skus: string[]): Promise<PaymentItemDetails[]>;
-  purchase(details: { itemId: string }): Promise<PurchaseResponse>;
-  consume(purchaseToken: string): Promise<void>;
-  listPurchases(): Promise<PurchaseDetails[]>;
-}
-interface PaymentItemDetails {
+type DGPrice = { value: string; currency: string };
+type DGDetail = {
   itemId: string;
   title: string;
-  description: string;
-  price: { currency: string; value: string };
-}
-interface PurchaseDetails {
+  price?: DGPrice;
+  description?: string;
+};
+
+export type PlayProduct = {
   itemId: string;
-  purchaseToken: string;
-}
-interface PurchaseResponse {
-  purchaseToken: string;
-}
+  title: string;
+  price: DGPrice;
+  description?: string;
+};
 
-declare global {
-  interface Window {
-    getDigitalGoodsService?: (serviceId: string) => Promise<DigitalGoodsService | null>;
-  }
-}
+type PurchaseFn = (sku: string) => Promise<string | null>;
 
-/**
- * Hook para Google Play Billing (Digital Goods API).
- * Só inicializa se `enabled === true` (ex.: quando estiver rodando em TWA).
- */
-const usePlayBilling = (enabled: boolean = false) => {
-  const [playStoreService, setPlayStoreService] = useState<DigitalGoodsService | null>(null);
-  const [products, setProducts] = useState<PaymentItemDetails[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(!!enabled);
+type HookReturn = {
+  playStoreService: any | null;
+  products: PlayProduct[];
+  loadProducts: (skus: string[]) => Promise<void>;
+  purchase: PurchaseFn;
+  isLoading: boolean;
+  isAvailable: boolean;
+  error: string | null;
+};
+
+const PLAY_METHOD = 'https://play.google.com/billing';
+
+export default function usePlayBilling(isTwa: boolean): HookReturn {
+  const [isLoading, setIsLoading] = useState(false);
+  const [isAvailable, setIsAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [products, setProducts] = useState<PlayProduct[]>([]);
+  const serviceRef = useRef<any | null>(null);
 
+  // Descobre se o DigitalGoods + Payments estão mesmo prontos
   useEffect(() => {
     let cancelled = false;
+    (async () => {
+      try {
+        setError(null);
+        if (!isTwa) {
+          setIsAvailable(false);
+          return;
+        }
+        const hasDG = typeof (window as any).getDigitalGoodsService === 'function';
+        const hasPayments = typeof (window as any).PaymentRequest === 'function';
+        if (!hasDG || !hasPayments) {
+          setIsAvailable(false);
+          return;
+        }
 
-    const init = async () => {
-      if (!enabled) {
-        setIsLoading(false);
-        return;
+        // Tenta inicializar cedo (lazy de qualquer forma)
+        if (!serviceRef.current) {
+          try {
+            const svc = await (window as any).getDigitalGoodsService(PLAY_METHOD);
+            if (!cancelled) serviceRef.current = svc ?? null;
+          } catch {
+            // ok, pode falhar aqui e funcionar no loadProducts
+          }
+        }
+        if (!cancelled) setIsAvailable(true);
+      } catch (e: any) {
+        if (!cancelled) {
+          setError(e?.message ?? 'Falha ao inicializar Play Billing');
+          setIsAvailable(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTwa]);
+
+  const ensureService = useCallback(async () => {
+    if (serviceRef.current) return serviceRef.current;
+    const svc = await (window as any).getDigitalGoodsService(PLAY_METHOD);
+    serviceRef.current = svc ?? null;
+    return serviceRef.current;
+  }, []);
+
+  const loadProducts = useCallback(async (skus: string[]) => {
+    if (!isTwa) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const svc = await ensureService();
+      if (!svc) throw new Error('Serviço do Google Play indisponível.');
+
+      const details: DGDetail[] = await svc.getDetails(skus);
+      const normalized: PlayProduct[] = (details || []).map((d) => ({
+        itemId: d.itemId,
+        // remove qualquer sufixo “(algo)” como “(unreviewed)” ou nome do app
+        title: (d.title || d.itemId).replace(/\s*\(.*?\)\s*$/, ''),
+        price: d.price ?? { value: '0', currency: 'BRL' },
+        description: d.description,
+      }));
+      setProducts(normalized);
+    } catch (e: any) {
+      setError(e?.message ?? 'Não foi possível carregar os produtos.');
+      setProducts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [ensureService, isTwa]);
+
+  const purchase: PurchaseFn = useCallback(async (sku: string) => {
+    setError(null);
+    try {
+      if (!isTwa) throw new Error('Compra disponível apenas dentro do app da Play.');
+      if (!isAvailable) throw new Error('Play Billing indisponível neste dispositivo.');
+
+      const svc = await ensureService();
+      if (!svc) throw new Error('Serviço do Google Play indisponível.');
+
+      // Recupera detalhes para montar o "total" (alguns devices exigem)
+      let price: DGPrice = { value: '0', currency: 'BRL' };
+      let title = sku;
+      try {
+        const [detail] = await svc.getDetails([sku]);
+        if (detail?.price?.value) price = detail.price!;
+        if (detail?.title) title = detail.title.replace(/\s*\(.*?\)\s*$/, '');
+      } catch {
+        // segue com defaults
       }
 
-      // Precisa ser contexto seguro (https) e API presente
-      const hasAPI = typeof window !== 'undefined' && !!window.getDigitalGoodsService;
-      const isSecure = typeof window !== 'undefined' && (window.isSecureContext ?? location.protocol === 'https:');
+      const method: PaymentMethodData = {
+        supportedMethods: PLAY_METHOD,
+        data: { sku },
+      } as any;
 
-      if (!hasAPI || !isSecure) {
-        setIsLoading(false);
-        return;
+      // Mesmo com Play Billing, alguns navegadores exigem "total"
+      const details: PaymentDetailsInit = {
+        total: {
+          label: title,
+          amount: { currency: price.currency || 'BRL', value: String(price.value || '0') },
+        },
+      };
+
+      const request = new (window as any).PaymentRequest([method], details);
+      // Sugestão: não usar canMakePayment() aqui — em TWA costuma ser true de qualquer forma
+
+      let response: PaymentResponse | null = null;
+      try {
+        response = await request.show();
+      } catch (err: any) {
+        // Usuário pode ter cancelado o sheet
+        if (err?.name === 'AbortError' || err?.name === 'NotAllowedError') {
+          setError('Compra cancelada pelo usuário.');
+          return null;
+        }
+        setError(err?.message ?? 'Falha ao abrir o pagamento.');
+        return null;
       }
 
       try {
-        const svc = await window.getDigitalGoodsService!("https://play.google.com/billing");
-        if (!cancelled && svc) setPlayStoreService(svc);
-      } catch (e: any) {
-        // Ex.: OperationError: unsupported context (fora do TWA)
-        console.warn('Play Billing indisponível neste contexto:', e?.name || e);
-        if (!cancelled) setError('Pagamento do Google Play indisponível neste dispositivo.');
-      } finally {
-        if (!cancelled) setIsLoading(false);
+        // Alguns devices devolvem token em 'purchaseToken', outros podem usar 'token'
+        const token = (response as any)?.details?.purchaseToken || (response as any)?.details?.token || null;
+        await response.complete('success');
+        if (!token) {
+          setError('Token de compra não retornado.');
+          return null;
+        }
+        return String(token);
+      } catch (err: any) {
+        setError(err?.message ?? 'Falha ao finalizar a compra.');
+        return null;
       }
-    };
-
-    init();
-    return () => { cancelled = true; };
-  }, [enabled]);
-
-  const loadProducts = useCallback(async (skus: string[]) => {
-    if (!playStoreService) return;
-    try {
-      const details = await playStoreService.getDetails(skus);
-      setProducts(details);
-    } catch (e) {
-      console.error('Erro ao carregar produtos do Google Play:', e);
-      setError('Não foi possível carregar os pacotes do Google Play.');
-    }
-  }, [playStoreService]);
-
-  const purchase = useCallback(async (sku: string) => {
-    if (!playStoreService) throw new Error('Serviço de pagamento não inicializado.');
-    try {
-      const result = await playStoreService.purchase({ itemId: sku });
-      return result.purchaseToken;
-    } catch (e: any) {
-      console.error('Erro na compra (Google Play):', e);
-      if (e?.name !== 'AbortError') setError('Ocorreu um erro durante a compra.');
+    } catch (err: any) {
+      setError(err?.message ?? 'Ocorreu um erro durante a compra.');
       return null;
     }
-  }, [playStoreService]);
+  }, [ensureService, isAvailable, isTwa]);
 
   return {
-    playStoreService,
+    playStoreService: serviceRef.current,
     products,
-    isLoading,
-    error,
-    isAvailable: !!playStoreService,
     loadProducts,
     purchase,
+    isLoading,
+    isAvailable,
+    error,
   };
-};
-
-export default usePlayBilling;
+}
 

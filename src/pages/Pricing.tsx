@@ -100,27 +100,33 @@ export default function Pricing() {
   }, [isTwaMode, isPlayAvailable, loadProducts]);
 
   // Converte produtos GP em packages
-  useEffect(() => {
-    if (!isTwaMode) return;
-    if (googlePlayProducts.length === 0) return;
-    const meta: Record<string, { currency?: string; title?: string }> = {};
-    const transformed = googlePlayProducts.map(p => {
-      meta[p.itemId] = { currency: p.price?.currency, title: p.title };
-      return {
-        id: p.itemId,
-        name: (p.title || p.itemId).replace(' (MelhoraFotoAI)', ''),
-        price: parseFloat(String(p.price?.value ?? '0')),
-        images: googlePlayProductMap[p.itemId]?.images || 0,
-        type: 'avulso',
-        description: googlePlayProductMap[p.itemId]?.description || '',
-        is_most_popular: googlePlayProductMap[p.itemId]?.is_most_popular || false,
-        created_at: new Date().toISOString(),
-        is_active: true,
-      } as PackageType;
-    });
-    playMetaRef.current = meta;
-    setDisplayPackages(transformed);
-  }, [isTwaMode, googlePlayProducts]);
+useEffect(() => {
+  if (!isTwaMode) return;
+  if (googlePlayProducts.length === 0) return;
+
+  const meta: Record<string, { currency?: string; title?: string }> = {};
+
+  const transformed = googlePlayProducts.map(p => {
+    // Preenche o "meta" para usar na formatação de preço lá no render
+    meta[p.itemId] = { currency: p.price?.currency, title: p.title };
+
+    return {
+      id: p.itemId,
+      name: (p.title || p.itemId).replace(/\s*\(.*?\)\s*$/, ''), // remove "(unreviewed)", etc.
+      price: parseFloat(String(p.price?.value ?? '0')),
+      images: googlePlayProductMap[p.itemId]?.images || 0,
+      type: 'avulso',
+      description: googlePlayProductMap[p.itemId]?.description || '',
+      is_most_popular: googlePlayProductMap[p.itemId]?.is_most_popular || false,
+      created_at: new Date().toISOString(),
+      is_active: true,
+    } as PackageType;
+  });
+
+  playMetaRef.current = meta;
+  setDisplayPackages(transformed);
+}, [isTwaMode, googlePlayProducts]);
+
 
   // Stripe (web)
   const handleStripePurchase = async (pkg: PackageType) => {
