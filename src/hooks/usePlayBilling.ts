@@ -8,7 +8,6 @@ type DGDetail = {
   price?: DGPrice;
   description?: string;
 };
-
 export type PlayProduct = {
   itemId: string;
   title: string;
@@ -17,7 +16,6 @@ export type PlayProduct = {
 };
 
 type PurchaseFn = (sku: string) => Promise<string | null>;
-
 type HookReturn = {
   playStoreService: any | null;
   products: PlayProduct[];
@@ -37,7 +35,6 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
   const [products, setProducts] = useState<PlayProduct[]>([]);
   const serviceRef = useRef<any | null>(null);
 
-  // Descobre se o DigitalGoods + Payments estão mesmo prontos
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -49,19 +46,13 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
         }
         const hasDG = typeof (window as any).getDigitalGoodsService === 'function';
         const hasPayments = typeof (window as any).PaymentRequest === 'function';
-        if (!hasDG || !hasPayments) {
-          setIsAvailable(false);
-          return;
-        }
+        if (!hasDG || !hasPayments) { setIsAvailable(false); return; }
 
-        // Tenta inicializar cedo (lazy de qualquer forma)
         if (!serviceRef.current) {
           try {
             const svc = await (window as any).getDigitalGoodsService(PLAY_METHOD);
             if (!cancelled) serviceRef.current = svc ?? null;
-          } catch {
-            // ok, pode falhar aqui e funcionar no loadProducts
-          }
+          } catch {/* ok */}
         }
         if (!cancelled) setIsAvailable(true);
       } catch (e: any) {
@@ -71,9 +62,7 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
         }
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [isTwa]);
 
   const ensureService = useCallback(async () => {
@@ -94,7 +83,6 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
       const details: DGDetail[] = await svc.getDetails(skus);
       const normalized: PlayProduct[] = (details || []).map((d) => ({
         itemId: d.itemId,
-        // remove qualquer sufixo “(algo)” como “(unreviewed)” ou nome do app
         title: (d.title || d.itemId).replace(/\s*\(.*?\)\s*$/, ''),
         price: d.price ?? { value: '0', currency: 'BRL' },
         description: d.description,
@@ -117,23 +105,20 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
       const svc = await ensureService();
       if (!svc) throw new Error('Serviço do Google Play indisponível.');
 
-      // Recupera detalhes para montar o "total" (alguns devices exigem)
+      // Recupera detalhes p/ preencher total (alguns devices exigem)
       let price: DGPrice = { value: '0', currency: 'BRL' };
       let title = sku;
       try {
         const [detail] = await svc.getDetails([sku]);
         if (detail?.price?.value) price = detail.price!;
         if (detail?.title) title = detail.title.replace(/\s*\(.*?\)\s*$/, '');
-      } catch {
-        // segue com defaults
-      }
+      } catch {/* segue */}
 
       const method: PaymentMethodData = {
         supportedMethods: PLAY_METHOD,
         data: { sku },
       } as any;
 
-      // Mesmo com Play Billing, alguns navegadores exigem "total"
       const details: PaymentDetailsInit = {
         total: {
           label: title,
@@ -142,24 +127,46 @@ export default function usePlayBilling(isTwa: boolean): HookReturn {
       };
 
       const request = new (window as any).PaymentRequest([method], details);
-      // Sugestão: não usar canMakePayment() aqui — em TWA costuma ser true de qualquer forma
 
+      // 1) Checa capacidade antes de abrir o sheet
+      try {
+        const can = await request.canMakePayment();
+        if (!can) {
+          setError('clientAppUnavailable');
+          return null;
+        }
+      } catch (e:any) {
+        // Alguns Chrome podem lançar erro aqui — só loga
+        console.log('[PR] canMakePayment error:', e?.name, e?.message);
+      }
+
+      // 2) Tenta abrir o sheet
       let response: PaymentResponse | null = null;
       try {
         response = await request.show();
       } catch (err: any) {
-        // Usuário pode ter cancelado o sheet
-        if (err?.name === 'AbortError' || err?.name === 'NotAllowedError') {
-          setError('Compra cancelada pelo usuário.');
-          return null;
-        }
-        setError(err?.message ?? 'Falha ao abrir o pagamento.');
+        const name = err?.name || 'UnknownError';
+        const msg = err?.message || String(err);
+        // Mostra o erro REAL no debug
+        setError(`${name}: ${msg}`);
         return null;
       }
 
+      // 3) Extrai o token
       try {
-        // Alguns devices devolvem token em 'purchaseToken', outros podem usar 'token'
-        const token = (response as any)?.details?.purchaseToken || (response as any)?.details?.token || null;
+        try {
+          console.log('[PR] details =', JSON.stringify((response as any)?.details || {}));
+        } catch {
+          console.log('[PR] details (raw) =', (response as any)?.details);
+        }
+        const d: any = (response as any)?.details || {};
+        const token =
+          d.purchaseToken ||
+          d.token ||
+          d.purchase_token ||
+          d.purchase?.purchaseToken ||
+          null;
+
         await response.complete('success');
         if (!token) {
           setError('Token de compra não retornado.');
