@@ -145,27 +145,36 @@ useEffect(() => {
   };
 
   // Google Play (TWA)
-  const handleGooglePlayPurchase = async (pkg: PackageType) => {
-    if (!profile) { toast.info('Você precisa estar logado para comprar.'); navigate('/login'); return; }
-    if (!isTwaMode) { toast.error('Este fluxo só funciona dentro do app da Play.'); return; }
+const handleGooglePlayPurchase = async (pkg: PackageType) => {
+  if (!profile) { toast.info('Você precisa estar logado para comprar.'); navigate('/login'); return; }
+  if (!isTwaMode) { toast.error('Este fluxo só funciona dentro do app da Play.'); return; }
 
-    setIsPurchasingId(pkg.id);
-    try {
-      const purchaseToken = await googlePlayPurchase(pkg.id);
-      if (!purchaseToken) throw new Error('Token de compra não retornado.');
+  setIsPurchasingId(pkg.id);
+  try {
+    const purchaseToken = await googlePlayPurchase(pkg.id);
 
-      toast.success('Compra aprovada no Google Play. Validando e adicionando créditos...');
-      const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
-        body: { sku: pkg.id, purchaseToken },
-      });
-      if (error || data?.error) throw new Error(error?.message || data?.error || 'Falha na validação do token.');
-      toast.success('Créditos adicionados com sucesso!');
-    } catch (err: any) {
-      toast.error(`Falha na compra: ${err.message}`);
-    } finally {
-      setIsPurchasingId(null);
+    // Se cancelou, o hook define playError. Evita "token não retornado".
+    if (!purchaseToken) {
+      if (playError && playError.toLowerCase().includes('cancelada')) {
+        toast.info('Compra cancelada — sem problemas.');
+        return;
+      }
+      throw new Error('Token de compra não retornado.');
     }
-  };
+
+    toast.success('Compra aprovada no Google Play. Validando e adicionando créditos...');
+    const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
+      body: { sku: pkg.id, purchaseToken },
+    });
+    if (error || data?.error) throw new Error(error?.message || data?.error || 'Falha na validação do token.');
+    toast.success('Créditos adicionados com sucesso!');
+  } catch (err: any) {
+    toast.error(`Falha na compra: ${err.message}`);
+  } finally {
+    setIsPurchasingId(null);
+  }
+};
+
 
   const avulsoPackages = useMemo(() => displayPackages.filter(p => p.type === 'avulso').sort((a, b) => a.price - b.price), [displayPackages]);
   const mensalPackages = useMemo(() => displayPackages.filter(p => p.type === 'mensal').sort((a, b) => a.price - b.price), [displayPackages]);
