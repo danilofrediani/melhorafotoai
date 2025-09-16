@@ -44,7 +44,7 @@ export default function Pricing() {
   const [isPurchasingId, setIsPurchasingId] = useState<string | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
 
-  const { profile, refreshProfile } = useAuth(); // Adicionado refreshProfile
+  const { profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const isTwaMode = useIsTwa();
   const {
@@ -68,7 +68,7 @@ export default function Pricing() {
             return {
               id: sku,
               name: `${meta.images ?? ''} Imagens (Teste)`,
-              price: 0, // Preço zero para teste
+              price: 0,
               images: meta.images || 0,
               type: 'avulso',
               description: meta.description || '',
@@ -81,7 +81,6 @@ export default function Pricing() {
           setDisplayPackages(transformed);
           setLoading(false);
         }
-        // A busca real de produtos do Google já é tratada no useEffect abaixo
       } else {
         try {
           const stripeData = await packageService.getActivePackages();
@@ -142,8 +141,11 @@ export default function Pricing() {
       navigate('/login'); return;
     }
     
-    // ✅ CORREÇÃO CRÍTICA: Usa o SKU correto do Google, seja no modo de teste ou real.
     const skuToSend = pkg.google_play_sku || pkg.id;
+    if (!skuToSend || !PLAY_SKUS.includes(skuToSend as any)) {
+      toast.error("Este pacote não está configurado para compra no app. Contate o suporte.");
+      return;
+    }
 
     setIsPurchasingId(pkg.id);
     try {
@@ -156,10 +158,16 @@ export default function Pricing() {
           body: { sku: skuToSend, purchaseToken: fakePurchaseToken },
         });
 
-        if (error || data?.error) throw new Error(error?.message || data?.error || 'A simulação falhou na validação do back-end.');
+        if (error || data?.error) {
+          throw new Error(error?.message || data?.error || 'A simulação falhou na validação do back-end.');
+        }
         
         toast.success(`Simulação bem-sucedida! ${data.creditsAdded} créditos foram adicionados.`);
-        await refreshProfile?.(); // Atualiza o perfil do usuário para mostrar os novos créditos
+        
+        // --- ✅ AJUSTE FINAL DE UX ✅ ---
+        await refreshProfile?.();
+        navigate('/dashboard');
+        // --- FIM DO AJUSTE ---
 
       } else {
         // --- FLUXO DE PRODUÇÃO NORMAL ---
@@ -176,9 +184,15 @@ export default function Pricing() {
           if (error || data?.error) throw new Error(error?.message || data?.error || 'Falha na validação do token.');
           
           toast.success('Créditos adicionados com sucesso!');
-          await refreshProfile?.(); // Atualiza o perfil do usuário
+          
+          // --- ✅ AJUSTE FINAL DE UX ✅ ---
+          await refreshProfile?.();
+          navigate('/dashboard');
+          // --- FIM DO AJUSTE ---
+
         } else if (!result.ok) {
-          throw new Error("Compra cancelada ou falhou.");
+          // O hook já trata o erro de cancelamento, não precisamos fazer nada aqui
+          console.log("Compra cancelada ou falhou sem token.");
         }
       }
     } catch (err: any) {

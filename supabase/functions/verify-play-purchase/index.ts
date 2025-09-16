@@ -5,7 +5,6 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const ANDROID_PUBLISHER = "https://androidpublisher.googleapis.com/androidpublisher/v3";
 const SCOPE = "https://www.googleapis.com/auth/androidpublisher";
 
-// Env: defina no Supabase (Dashboard → Project Settings → Secrets)
 const SA_EMAIL = Deno.env.get("GOOGLE_SA_EMAIL");
 const SA_PK = (Deno.env.get("GOOGLE_SA_PRIVATE_KEY") || "").replace(/\\n/g, "\n");
 const PACKAGE_NAME = Deno.env.get("GP_PACKAGE_NAME");
@@ -14,8 +13,14 @@ const SKU_TO_CREDITS: Record<string, number> = {
   credits_20: 20,
   credits_50: 50
 };
+// ✅ Adicionado cabeçalhos de CORS para reutilização
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
 
 async function getAccessToken() {
+  // ... (código sem alteração)
   const now = Math.floor(Date.now() / 1000);
   const pk = await importPKCS8(SA_PK, "RS256");
   const jwt = await new SignJWT({ scope: SCOPE }).setProtectedHeader({ alg: "RS256", typ: "JWT" }).setIssuedAt(now).setIssuer(SA_EMAIL).setSubject(SA_EMAIL).setAudience(GOOGLE_TOKEN_URL).setExpirationTime(now + 3600).sign(pk);
@@ -34,19 +39,14 @@ async function getAccessToken() {
 
 
 Deno.serve(async (req)=>{
-  // Criamos um cliente Admin para ter permissão de modificar os dados
   const supabaseAdmin = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
   try {
-    // Adicionando headers de CORS para permitir chamadas do seu app local e de produção
     if (req.method === 'OPTIONS') {
-      return new Response('ok', { headers: { 
-        'Access-Control-Allow-Origin': '*', // Em produção, restrinja ao seu domínio
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-      }});
+      return new Response('ok', { headers: corsHeaders });
     }
 
     if (req.method !== "POST") {
@@ -55,22 +55,22 @@ Deno.serve(async (req)=>{
     
     const { sku, purchaseToken } = await req.json();
     if (!sku || !purchaseToken) {
-      return new Response(JSON.stringify({ error: "Parâmetros inválidos (sku, purchaseToken)" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Parâmetros inválidos" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // --- LÓGICA DO MODO DE SIMULAÇÃO ---
+    let orderId = purchaseToken; // Usa o token de teste como orderId para simulações
+
     if (purchaseToken.startsWith('FAKE_PURCHASE_TOKEN_')) {
       console.log(`MODO SIMULAÇÃO: Compra aprovada para o SKU: ${sku}`);
     } else {
-      // --- FLUXO DE PRODUÇÃO NORMAL ---
       const accessToken = await getAccessToken();
-      
       const getUrl = `${ANDROID_PUBLISHER}/applications/${PACKAGE_NAME}/purchases/products/${encodeURIComponent(sku)}/tokens/${encodeURIComponent(purchaseToken)}`;
       const getRes = await fetch(getUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
       const purchase = await getRes.json();
+      orderId = purchase.orderId; // Usa o orderId real da compra
       
       if (!getRes.ok || purchase.purchaseState !== 0) {
-        return new Response(JSON.stringify({ error: "Compra inválida ou não concluída.", details: purchase }), { status: 400, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "Compra inválida ou não concluída.", details: purchase }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       const consumeUrl = `${ANDROID_PUBLISHER}/applications/${PACKAGE_NAME}/purchases/products/${encodeURIComponent(sku)}/tokens/${encodeURIComponent(purchaseToken)}:consume`;
@@ -78,11 +78,10 @@ Deno.serve(async (req)=>{
 
       if (!consumeRes.ok) {
         const t = await consumeRes.text().catch(()=>"");
-        return new Response(JSON.stringify({ error: `Falha ao consumir a compra: ${consumeRes.status} ${t}` }), { status: 400, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: `Falha ao consumir a compra: ${consumeRes.status} ${t}` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
 
-    // --- LÓGICA FINAL PARA ADICIONAR CRÉDITOS ---
     const creditsToAdd = SKU_TO_CREDITS[sku] ?? 0;
     if (creditsToAdd > 0) {
       const authHeader = req.headers.get('Authorization')!;
@@ -92,30 +91,43 @@ Deno.serve(async (req)=>{
       if (!user) throw new Error("Usuário não encontrado a partir do token.");
       
       const { error: rpcError } = await supabaseAdmin.rpc('add_user_credits', {
-        p_user_id: user.id,
-        p_credits_to_add: creditsToAdd,
-        p_package_id: null,
-        p_purchase_provider: purchaseToken.startsWith('FAKE_PURCHASE_TOKEN_') ? 'google_play_test' : 'google_play',
-        p_provider_order_id: purchaseToken 
+        user_id_param: user.id,
+        credit_amount: creditsToAdd
       });
 
       if (rpcError) {
-        console.error('ERRO CRÍTICO: Falha ao adicionar créditos após compra validada.', rpcError);
         throw new Error(`Falha ao adicionar créditos: ${rpcError.message}`);
+      }
+
+      // ✅ CORREÇÃO 2: Registrando a transação no histórico
+      const { error: transactionError } = await supabaseAdmin.from('transactions').insert({
+        user_id: user.id,
+        package_id: null, // O SKU do Google não é um UUID, então deixamos nulo ou criamos um mapeamento
+        amount: 0, // A API do Google não nos dá o preço aqui, podemos buscar ou deixar 0
+        currency: 'BRL',
+        status: 'completed',
+        payment_method: 'google_play',
+        metadata: { sku, provider_order_id: orderId }
+      });
+
+      if (transactionError) {
+        // Logamos o erro mas não paramos o processo, pois o usuário já recebeu os créditos
+        console.error("Erro ao registrar a transação, mas os créditos foram concedidos:", transactionError);
       }
     }
 
+    // ✅ CORREÇÃO 1: Adicionando cabeçalhos de CORS à resposta de sucesso
     return new Response(JSON.stringify({ 
       ok: true, 
       creditsAdded: creditsToAdd, 
       sku 
     }), {
-      status: 200, headers: { "Content-Type": "application/json" }
+      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
 
   } catch (e) {
     return new Response(JSON.stringify({ error: e?.message || "Erro inesperado" }), {
-      status: 500, headers: { "Content-Type": "application/json" }
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 });
