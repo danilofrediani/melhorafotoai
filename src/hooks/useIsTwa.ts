@@ -1,20 +1,23 @@
-// src/hooks/useIsTwa.ts
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
 /**
- * Detecta se estamos rodando dentro de um TWA (Android)
- * de forma conservadora, verificando a presença do
- * Digital Goods Service do Google Play.
+ * Detecta TWA / suporte ao Google Play Billing (via Payment Request).
+ * Export nomeado (conserta o build).
  */
-function useIsTwa() {
+export function useIsTwa() {
   const [isTwa, setIsTwa] = useState(false);
 
   useEffect(() => {
     try {
-      const hasDG =
-        typeof window !== 'undefined' &&
-        typeof (window as any).getDigitalGoodsService === 'function';
-      setIsTwa(!!hasDG);
+      const w = window as any;
+      // heurísticas simples: display-mode standalone OU presença das APIs do TWA
+      const standalone =
+        window.matchMedia?.("(display-mode: standalone)")?.matches ?? false;
+
+      const hasDG = typeof w.getDigitalGoodsService === "function";
+      const hasPlayPR = typeof (window as any).PaymentRequest === "function";
+
+      setIsTwa(Boolean(standalone || hasDG || hasPlayPR));
     } catch {
       setIsTwa(false);
     }
@@ -23,7 +26,5 @@ function useIsTwa() {
   return isTwa;
 }
 
-// Exporta das duas formas para não quebrar nenhum import
-export { useIsTwa };
 export default useIsTwa;
 
