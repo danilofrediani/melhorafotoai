@@ -20,8 +20,8 @@
     "path": "/home/danilofrediani/melhorafotoai/android.keystore",
     "alias": "android"
   },
-  "appVersionName": "2",
-  "appVersionCode": 2,
+  "appVersionName": "3",
+  "appVersionCode": 3,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://melhorafotoai.com.br/manifest.json",
@@ -29,6 +29,12 @@
   "features": {
     "playBilling": {
       "enabled": true
+    },
+    "delegation": {
+      "enabled": true,
+      "permissions": [
+        "play"
+      ]
     }
   },
   "alphaDependencies": {
@@ -46,5 +52,5 @@
   "protocolHandlers": [],
   "fileHandlers": [],
   "launchHandlerClientMode": "",
-  "appVersion": "2"
+  "appVersion": "3"
 }
