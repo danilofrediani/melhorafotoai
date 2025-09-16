@@ -37,59 +37,29 @@ const usePlayBilling = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- LÓGICA DE INICIALIZAÇÃO MODIFICADA (MAIS PACIENTE) ---
   useEffect(() => {
-    // Tenta encontrar o serviço por 3 segundos antes de desistir.
-    const maxRetries = 30; // 30 tentativas
-    const retryDelay = 100; // a cada 100ms
-    let attempt = 0;
-
-    const intervalId = setInterval(async () => {
-      attempt++;
-      console.log(`Tentativa ${attempt} de encontrar o serviço de pagamento...`);
-
+    const initializeService = async () => {
+      // Agora, simplesmente tentamos inicializar. Sem polling.
+      // Se 'getDigitalGoodsService' não existir, ele simplesmente não fará nada.
       if (window.getDigitalGoodsService) {
-        clearInterval(intervalId); // Para de tentar assim que encontra
-        console.log("Serviço encontrado! Inicializando...");
         try {
           const service = await window.getDigitalGoodsService("https://play.google.com/billing");
-          if (service) {
-            setPlayStoreService(service);
-          } else {
-            setError("Serviço de pagamento do Google Play não disponível.");
-          }
+          setPlayStoreService(service);
         } catch (e) {
           console.error("Erro ao inicializar o serviço de pagamento:", e);
           setError("Falha ao conectar com o serviço de pagamento.");
-        } finally {
-          setIsLoading(false);
         }
-        return;
       }
-      
-      if (attempt >= maxRetries) {
-        clearInterval(intervalId); // Desiste após 3 segundos
-        console.log("Serviço não encontrado após 3 segundos. Assumindo modo web.");
-        setError("API de Bens Digitais não encontrada. Acesso via web?");
-        setIsLoading(false);
-      }
-    }, retryDelay);
+      setIsLoading(false); // Sempre para de carregar, mesmo que o serviço não exista
+    };
 
-    // Limpa o intervalo se o componente for desmontado
-    return () => clearInterval(intervalId);
+    initializeService();
   }, []);
-  // --- FIM DA LÓGICA MODIFICADA ---
-
 
   const loadProducts = useCallback(async (skus: string[]) => {
-    if (!playStoreService) {
-      console.log("Serviço não está pronto para carregar produtos.");
-      return;
-    }
+    if (!playStoreService) return; // Se não houver serviço, não faz nada
     try {
-      console.log("Buscando detalhes dos produtos:", skus);
       const details = await playStoreService.getDetails(skus);
-      console.log("Produtos recebidos:", details);
       setProducts(details);
     } catch (e) {
       console.error("Erro ao carregar detalhes dos produtos:", e);
@@ -102,9 +72,7 @@ const usePlayBilling = () => {
       throw new Error("Serviço de pagamento não inicializado.");
     }
     try {
-      console.log("Iniciando compra para o SKU:", sku);
       const result = await playStoreService.purchase({ itemId: sku });
-      console.log("Compra realizada, token:", result.purchaseToken);
       return result.purchaseToken;
     } catch (e) {
       console.error("Erro durante a compra:", e);
