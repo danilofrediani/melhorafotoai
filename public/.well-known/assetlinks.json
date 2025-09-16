@@ -1,10 +1,14 @@
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "br.com.melhorafotoai.twa",
-    "sha256_cert_fingerprints": [
-      "42:C7:D5:92:4E:73:0D:CF:F4:25:BD:D4:9F:C9:B4:EA:8F:40:03:A5:6D:CD:F9:96:90:D2:81:EA:F5:4F:BE:2A"
-    ]
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "br.com.melhorafotoai.twa",
+      "sha256_cert_fingerprints": [
+        "42:C7:D5:92:4E:73:0D:CF:F4:25:BD:D4:9F:C9:B4:EA:8F:40:03:A5:6D:CD:F9:96:90:D2:81:EA:F5:4F:BE:2A",
+        "4F:1E:DB:5E:CB:9E:A4:B8:0A:6F:B4:B6:93:18:35:A6:A5:94:F5:DC:E5:81:F0:90:2C:2F:E5:56:6E:69:93:41"
+      ]
+    }
   }
-}]
+]
+
