@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
 import { useIsTwa } from '@/hooks/useIsTwa';
-import { usePlayBilling } from '@/hooks/usePlayBilling';
+import usePlayBilling from '@/hooks/usePlayBilling';
 
 // --- DEBUG SEMPRE VISÍVEL (temporário)
 const SHOW_DEBUG = true;
