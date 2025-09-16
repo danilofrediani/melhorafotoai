@@ -21,7 +21,7 @@ import usePlayBilling, { type PlayProduct } from '@/hooks/usePlayBilling';
 // CONFIG DE DEBUG / TESTE
 // ======================================================
 const DEBUG_BOX = true;
-const SIMULATE_PURCHASE = true;
+const SIMULATE_PURCHASE = false;
 const FORCE_PLAY_STATIC = SIMULATE_PURCHASE || import.meta.env.VITE_FORCE_PLAY_STATIC === 'true' || new URLSearchParams(location.search).get('play') === 'static';
 const STATIC_TEST_SKU = 'android.test.purchased';
 const PLAY_SKUS = ['credits_10', 'credits_20', 'credits_50'] as const;
