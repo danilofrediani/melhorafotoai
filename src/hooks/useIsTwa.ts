@@ -3,10 +3,10 @@ import { useEffect, useState } from 'react';
 
 /**
  * Detecção robusta de TWA:
- * - referrer android-app://... (válido para TWA verificada)
+ * - referrer android-app://... (vínculo TWA)
  * - display-mode: standalone (Chrome/Android)
  * - sem token de WebView (; wv)
- * - fallback para hints de bridge
+ * - fallback para possíveis bridges
  */
 export default function useIsTwa(): boolean {
   const [isTwa, setIsTwa] = useState(false);

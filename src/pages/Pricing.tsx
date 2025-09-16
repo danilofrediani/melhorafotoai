@@ -14,8 +14,8 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
-import { useIsTwa } from '@/hooks/useIsTwa';
-import usePlayBilling from '@/hooks/usePlayBilling';
+import useIsTwa from '@/hooks/useIsTwa';            // <- default import (corrigido)
+import usePlayBilling from '@/hooks/usePlayBilling'; // <- default import
 
 // --- DEBUG SEMPRE VISÍVEL (temporário)
 const SHOW_DEBUG = true;
@@ -138,7 +138,7 @@ export default function Pricing() {
     }
   };
 
-  // Google Play (TWA) — sem bloquear playStoreService
+  // Google Play (TWA)
   const handleGooglePlayPurchase = async (pkg: PackageType) => {
     if (!profile) { toast.info('Você precisa estar logado para comprar.'); navigate('/login'); return; }
     if (!isTwaMode) { toast.error('Este fluxo só funciona dentro do app da Play.'); return; }
