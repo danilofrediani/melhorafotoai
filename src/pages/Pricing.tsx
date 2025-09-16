@@ -27,7 +27,6 @@ const DEBUG_BOX = true;
 // 2) defina VITE_FORCE_PLAY_STATIC=true no .env;
 // 3) acesse a página com ?play=static na URL.
 const FORCE_PLAY_STATIC =
-  true ||
   import.meta.env.VITE_FORCE_PLAY_STATIC === 'true' ||
   new URLSearchParams(location.search).get('play') === 'static';
 
