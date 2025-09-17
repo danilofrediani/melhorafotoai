@@ -7,31 +7,58 @@ import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
 import { ImageIcon, Upload, CreditCard, Download, Star, TrendingUp, History, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import type { ProcessedImage, Transaction } from '@/lib/supabase';
+import type { ProcessedImage, Transaction } from '@/lib/types';
 import { useEffect, useState } from 'react';
 import { imageService, transactionService } from '@/lib/database';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
+// --- ✅ NOVA FUNÇÃO ASSISTENTE DE DOWNLOAD ✅ ---
+const forceDownload = async (url: string, filename: string) => {
+  try {
+    toast.info('Preparando download...');
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Não foi possível buscar a imagem para download.');
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    URL.revokeObjectURL(objectUrl);
+    toast.success('Download iniciado!');
+  } catch (error: any) {
+    console.error("Erro no download forçado:", error);
+    toast.error(error.message || 'Falha ao iniciar o download.');
+  }
+};
+// --- FIM DA FUNÇÃO ---
+
 const categoryEmoji = { 'alimentos': '🍕', 'produtos': '📦' };
 
-// Dados que agora vêm do banco (com nome do arquivo original)
 type ProcessedImageWithOriginal = ProcessedImage & {
   uploaded_images: { original_filename: string } | null;
 };
 
 export default function Dashboard() {
-  const { user, profile, refetchProfile, isLoadingProfile } = useAuth();
+  const { user, profile, refreshProfile, isLoadingProfile } = useAuth();
 
   const [imageHistory, setImageHistory] = useState<ProcessedImageWithOriginal[]>([]);
   const [transactions, setTransactions] = useState<(Transaction & { packages: { name: string } | null })[]>([]);
   const [isLoadingPageData, setIsLoadingPageData] = useState(true);
+  const [isDownloading, setIsDownloading] = useState(false); // Estado para o botão de download
 
   useEffect(() => {
     if (user && !profile) {
-      refetchProfile();
+      refreshProfile();
     }
-  }, [user, profile, refetchProfile]);
+  }, [user, profile, refreshProfile]);
 
   useEffect(() => {
     const loadPageData = async () => {
@@ -58,6 +85,7 @@ export default function Dashboard() {
     loadPageData();
   }, [profile]);
 
+  // ... (funções formatDate, friendlyTitle, friendlyDownloadName permanecem iguais)
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('pt-BR', {
@@ -65,7 +93,6 @@ export default function Dashboard() {
     });
   };
 
-  // Gera um título amigável para exibir no histórico
   const friendlyTitle = (img: ProcessedImageWithOriginal): string => {
     const raw = img.uploaded_images?.original_filename || '';
     const created = new Date(img.created_at ?? Date.now());
@@ -73,10 +100,8 @@ export default function Dashboard() {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit'
     });
-
     if (!raw) return `Foto ${when}`;
-
-    const base = raw.replace(/\.[^/.]+$/, ''); // remove extensão
+    const base = raw.replace(/\.[^/.]+$/, '');
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base);
     const isLongHash = /^[A-Za-z0-9_-]{20,}$/.test(base);
     const isDigits = /^\d{12,}$/.test(base);
@@ -84,18 +109,15 @@ export default function Dashboard() {
       /^PXL_\d{8}_\d{6}/.test(base) ||
       /^IMG_\d{8}_\d{6}/.test(base) ||
       /^image-\d+/.test(base);
-
     if (isUUID || isLongHash || isDigits || isCameraPattern) {
       return `Foto ${when}`;
     }
-
-    // Nome normal: apenas limita comprimento para não quebrar layout
     if (base.length > 40) return base.slice(0, 37) + '...';
     return base;
   };
 
   const friendlyDownloadName = (img: ProcessedImageWithOriginal): string => {
-    const title = friendlyTitle(img).replace(/[^\p{L}\p{N}\s._-]/gu, ''); // limpa caracteres estranhos
+    const title = friendlyTitle(img).replace(/[^\p{L}\p{N}\s._-]/gu, '');
     return `${title}_melhorada.png`;
   };
 
@@ -122,7 +144,14 @@ export default function Dashboard() {
     )
   }
 
+  const handleDownloadClick = async (url: string, filename: string) => {
+    setIsDownloading(true);
+    await forceDownload(url, filename);
+    setIsDownloading(false);
+  };
+
   const totalImagesProcessed = imageHistory.length;
+  // @ts-ignore - Supabase pode não ter esse campo no tipo, mas ele existe
   const totalDownloads = profile.download_count ?? 0;
   const categoryStats = imageHistory.reduce((acc, img) => {
     if (img.processing_type) { acc[img.processing_type] = (acc[img.processing_type] || 0) + 1; }
@@ -140,7 +169,6 @@ export default function Dashboard() {
           <p className="text-gray-600">Gerencie suas imagens e acompanhe seu uso</p>
         </div>
 
-        {/* === (2) AÇÕES RÁPIDAS E SEUS CRÉDITOS — AGORA NO TOPO === */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <Card>
             <CardHeader>
@@ -196,9 +224,9 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* === MÉTRICAS — AGORA ABAIXO === */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
+           {/* ... (cards de métricas) ... */}
+           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Imagens Restantes</CardTitle>
               <ImageIcon className="h-4 w-4 text-primary" />
@@ -208,7 +236,6 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground mt-2">Créditos disponíveis para uso</p>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Imagens Processadas</CardTitle>
@@ -219,7 +246,6 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">Total de imagens melhoradas</p>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Downloads</CardTitle>
@@ -230,7 +256,6 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">Total de downloads realizados</p>
             </CardContent>
           </Card>
-
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Categoria Favorita</CardTitle>
@@ -247,7 +272,6 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* === HISTÓRICO === */}
         <Card>
           <CardHeader>
             <CardTitle>Histórico de Imagens</CardTitle>
@@ -264,10 +288,8 @@ export default function Dashboard() {
                   const publicURL = image.processed_file_path
                     ? supabase.storage.from('processed-images').getPublicUrl(image.processed_file_path).data.publicUrl
                     : '';
-
                   const title = friendlyTitle(image);
                   const downloadName = friendlyDownloadName(image);
-
                   return (
                     <div key={image.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
                       <div className="flex items-center space-x-4">
@@ -279,11 +301,16 @@ export default function Dashboard() {
                           <p className="text-xs text-gray-500">{formatDate(image.created_at)}</p>
                         </div>
                       </div>
-                      <a href={publicURL} target="_blank" download={downloadName} rel="noopener noreferrer">
-                        <Button size="sm" variant="outline">
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </a>
+                      
+                      {/* --- ✅ MUDANÇA APLICADA AQUI ✅ --- */}
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={() => handleDownloadClick(publicURL, downloadName)}
+                        disabled={isDownloading}
+                      >
+                         {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      </Button>
                     </div>
                   );
                 })}
@@ -300,4 +327,3 @@ export default function Dashboard() {
     </div>
   );
 }
-

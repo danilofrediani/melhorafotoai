@@ -25,6 +25,33 @@ import { v4 as uuidv4 } from 'uuid';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 import CameraPicker from '@/components/CameraPicker';
 
+// --- ✅ NOVA FUNÇÃO ASSISTENTE DE DOWNLOAD ✅ ---
+const forceDownload = async (url: string, filename: string) => {
+  try {
+    toast.info('Preparando download...');
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Não foi possível buscar a imagem para download.');
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    URL.revokeObjectURL(objectUrl);
+    toast.success('Download iniciado!');
+  } catch (error: any) {
+    console.error("Erro no download forçado:", error);
+    toast.error(error.message || 'Falha ao iniciar o download.');
+  }
+};
+// --- FIM DA FUNÇÃO ---
+
 interface ProcessResult {
   id: string;
   originalFile: File;
@@ -49,7 +76,6 @@ const PRESET_MAX_SIDE = 2048;
 const TARGET_MAX_BYTES = 7.5 * 1024 * 1024;
 
 export default function Upload() {
-  // ✅ CORREÇÃO: O nome da função foi corrigido de 'refetchProfile' para 'refreshProfile'
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -60,8 +86,10 @@ export default function Upload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [category, setCategory] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false); // Estado para o botão de download
   const dropRef = useRef<HTMLDivElement | null>(null);
 
+  // ... (O resto dos seus hooks e funções permanece o mesmo)
   useEffect(() => {
     if (user && !profile) { refreshProfile(); }
     if (profile && profile.default_category) { setCategory(profile.default_category); }
@@ -78,8 +106,6 @@ export default function Upload() {
   }, [projectId, profile]);
 
   const remainingImages = profile?.remaining_images ?? 0;
-
-  // ... (O restante do arquivo permanece exatamente igual, pois a lógica estava correta)
 
   const getFileDimensions = (file: File): Promise<{ width: number; height: number }> => {
     return new Promise((resolve, reject) => {
@@ -352,7 +378,6 @@ export default function Upload() {
 
         if (finalProcessedUrl) {
           toast.success(`"${imageToProcess.originalFile.name}" melhorada!`);
-          // ✅ CORREÇÃO: O nome da função foi corrigido de 'refetchProfile' para 'refreshProfile'
           await refreshProfile();
         } else {
           toast.error(`Falha no processamento de "${imageToProcess.originalFile.name}".`);
@@ -377,6 +402,12 @@ export default function Upload() {
     setProcessedImages([]);
   }
 
+  const handleDownloadClick = async (url: string, filename: string) => {
+    setIsDownloading(true);
+    await forceDownload(url, filename);
+    setIsDownloading(false);
+  };
+
   const pendingImagesCount = processedImages.filter(p => p.status === 'pending').length;
   const hasCompletedImages = processedImages.some(p => p.status === 'completed' || p.status === 'error');
   const isDoneProcessing = !isProcessing && hasCompletedImages;
@@ -386,6 +417,7 @@ export default function Upload() {
       <Header />
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
+          {/* ... (resto do seu JSX do topo) ... */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Upload de Imagens</h1>
             <p className="text-gray-600">Faça upload das suas imagens e veja a magia da nossa IA acontecer</p>
@@ -407,7 +439,7 @@ export default function Upload() {
               )}
             </div>
           </div>
-
+          {/* ... (resto do seu JSX do upload) ... */}
           {isDoneProcessing && pendingImagesCount === 0 ? (
              <Card className="mb-8 text-center">
                <CardHeader><CardTitle>Processamento Concluído</CardTitle></CardHeader>
@@ -503,7 +535,6 @@ export default function Upload() {
               )}
             </Button>
           </div>
-
           {processedImages.length > 0 && (
             <Card>
               <CardHeader><CardTitle>Resultados</CardTitle></CardHeader>
@@ -547,11 +578,17 @@ export default function Upload() {
                           </div>
                         )}
                       </div>
-
+                      
+                      {/* --- ✅ MUDANÇA APLICADA AQUI ✅ --- */}
                       {image.status === 'completed' && image.processedUrl && (
-                        <a href={image.processedUrl} download={`${image.originalFile.name.substring(0, image.originalFile.name.lastIndexOf('.'))}_melhorada.png`} className="mt-4 w-full inline-block">
-                          <Button className="w-full"><Download className="mr-2 h-4 w-4" /> Download</Button>
-                        </a>
+                        <Button 
+                          className="mt-4 w-full" 
+                          onClick={() => handleDownloadClick(image.processedUrl!, `${image.originalFile.name.substring(0, image.originalFile.name.lastIndexOf('.'))}_melhorada.png`)}
+                          disabled={isDownloading}
+                        >
+                          {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                          Download
+                        </Button>
                       )}
                     </div>
                   ))}
