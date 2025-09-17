@@ -41,16 +41,19 @@ const RouteTracker = () => {
 };
 
 const App = () => {
-  // ✅ --- LÓGICA DE RECUPERAÇÃO DE SENHA APRIMORADA --- ✅
-  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  // ✅ --- LÓGICA DE RECUPERAÇÃO DE SENHA APRIMORADA E IMEDIATA --- ✅
+  // Verificamos a URL diretamente na renderização, antes de qualquer useEffect.
+  // Isso evita a "condição de corrida" e garante que a página correta seja exibida.
+  const isRecovery = window.location.hash.includes('type=recovery');
+
+  // Mantemos o estado para lidar com o evento do Supabase como um fallback seguro.
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(isRecovery);
 
   useEffect(() => {
-    // Verifica a URL na primeira renderização para o tipo 'recovery'
-    if (window.location.hash.includes('type=recovery')) {
-      setIsPasswordRecovery(true);
-    }
+    // Se a verificação da URL já for verdadeira, não precisamos fazer mais nada.
+    if (isRecovery) return;
 
-    // Mantém o listener para outros eventos, se necessário
+    // Listener para o evento, caso a verificação de URL falhe por algum motivo.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") {
         setIsPasswordRecovery(true);
@@ -60,9 +63,9 @@ const App = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isRecovery]); // Adicionamos isRecovery como dependência
 
-  // Se for uma recuperação de senha, mostramos apenas essa página.
+  // A verificação agora é instantânea.
   if (isPasswordRecovery) {
     return <ResetPassword />;
   }
