@@ -22,6 +22,7 @@ import ProjectView from './pages/ProjectView';
 import Terms from './pages/Terms'; 
 import Privacy from './pages/Privacy';
 import Faq from './pages/Faq';
+import ExclusaoDeConta from './pages/ExclusaoDeConta'; // <-- ✅ NOVA IMPORTAÇÃO
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,7 @@ const App = () => (
               <Route path="/termos" element={<Terms />} />
               <Route path="/privacidade" element={<Privacy />} />
               <Route path="/faq" element={<Faq />} />
+              <Route path="/exclusao-de-conta" element={<ExclusaoDeConta />} /> {/* <-- ✅ NOVA ROTA */}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

@@ -24,7 +24,6 @@ const Footer = () => {
             <h3 className="font-semibold text-gray-900 mb-4">Produto</h3>
             <ul className="space-y-2 text-sm">
               <li><Link to="/pricing" className="text-gray-600 hover:text-primary">Preços</Link></li>
-              {/* O link de Upload foi removido daqui */}
               <li><a href="/#categorias" className="text-gray-600 hover:text-primary">Categorias</a></li>
               <li><a href="/#como-funciona" className="text-gray-600 hover:text-primary">Como funciona</a></li>
             </ul>
@@ -37,6 +36,7 @@ const Footer = () => {
               <li><Link to="/faq" className="text-gray-600 hover:text-primary">FAQ</Link></li>
               <li><Link to="/termos" className="text-gray-600 hover:text-primary">Termos de uso</Link></li>
               <li><Link to="/privacidade" className="text-gray-600 hover:text-primary">Privacidade</Link></li>
+              <li><Link to="/exclusao-de-conta" className="text-gray-600 hover:text-primary">Exclusão de Dados</Link></li> {/* <-- ✅ NOVO LINK */}
             </ul>
           </div>
 
