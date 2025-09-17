@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'; // Adicionado useState
+import { useEffect, useState } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -6,7 +6,7 @@ import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PackageProvider } from '@/contexts/PackageContext';
 import ReactGA from 'react-ga4';
-import { supabase } from '@/lib/supabase'; // <-- ✅ NOVA IMPORTAÇÃO
+import { supabase } from '@/lib/supabase';
 
 // Pages
 import Index from './pages/Index';
@@ -24,7 +24,7 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import Faq from './pages/Faq';
 import ExclusaoDeConta from './pages/ExclusaoDeConta';
-import ResetPassword from './pages/ResetPassword'; // <-- ✅ NOVA IMPORTAÇÃO
+import ResetPassword from './pages/ResetPassword';
 
 const queryClient = new QueryClient();
 
@@ -41,10 +41,16 @@ const RouteTracker = () => {
 };
 
 const App = () => {
-  // ✅ --- LÓGICA PARA ROTA DE RECUPERAÇÃO DE SENHA --- ✅
+  // ✅ --- LÓGICA DE RECUPERAÇÃO DE SENHA APRIMORADA --- ✅
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
+    // Verifica a URL na primeira renderização para o tipo 'recovery'
+    if (window.location.hash.includes('type=recovery')) {
+      setIsPasswordRecovery(true);
+    }
+
+    // Mantém o listener para outros eventos, se necessário
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") {
         setIsPasswordRecovery(true);
@@ -84,7 +90,6 @@ const App = () => {
                 <Route path="/privacidade" element={<Privacy />} />
                 <Route path="/faq" element={<Faq />} />
                 <Route path="/exclusao-de-conta" element={<ExclusaoDeConta />} />
-                {/* A rota de reset não é mais necessária aqui, pois o App a controla */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>
