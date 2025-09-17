@@ -9,13 +9,29 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
+// --- NOVO: Importações para o Dialog ---
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog"
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login, isLoading } = useAuth();
-  console.log("%cLogin.tsx LOG: Renderizou com isLoading =", "color: red; font-weight: bold;", isLoading);
+  const { login, isLoading, resetPassword } = useAuth(); // Adicionado resetPassword do contexto
   const navigate = useNavigate();
+
+  // --- NOVO: Estados para o formulário de recuperação ---
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const redirectByRole = (role?: 'basic' | 'professional' | 'admin') => {
     if (role === 'admin') {
@@ -54,6 +70,25 @@ export default function Login() {
     } catch (err) {
       console.error('Unexpected error in handleSubmit:', err);
       setError('Erro inesperado. Tente novamente.');
+    }
+  };
+
+  // --- NOVO: Função para lidar com a recuperação de senha ---
+  const handlePasswordReset = async () => {
+    if (!recoveryEmail) {
+      toast.error("Por favor, insira seu e-mail.");
+      return;
+    }
+    setIsResetting(true);
+    const success = await resetPassword(recoveryEmail.trim().toLowerCase());
+    setIsResetting(false);
+    
+    if (success) {
+      toast.info("Se uma conta com este e-mail existir, um link de recuperação foi enviado.");
+      setDialogOpen(false); // Fecha o dialog em caso de sucesso
+      setRecoveryEmail('');
+    } else {
+      toast.error("Ocorreu um erro ao tentar enviar o e-mail. Tente novamente.");
     }
   };
 
@@ -99,7 +134,49 @@ export default function Login() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Senha</Label>
+                {/* --- NOVO: Label e link "Esqueci minha senha" --- */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Senha</Label>
+                  <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                    <DialogTrigger asChild>
+                      <button type="button" className="text-sm font-medium text-primary hover:underline">
+                        Esqueci minha senha
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                      <DialogHeader>
+                        <DialogTitle>Recuperar Senha</DialogTitle>
+                        <DialogDescription>
+                          Digite seu e-mail abaixo. Enviaremos um link para você criar uma nova senha.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="recovery-email" className="text-right">
+                            Email
+                          </Label>
+                          <Input
+                            id="recovery-email"
+                            type="email"
+                            value={recoveryEmail}
+                            onChange={(e) => setRecoveryEmail(e.target.value)}
+                            className="col-span-3"
+                            placeholder="seu@email.com"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <DialogClose asChild>
+                          <Button type="button" variant="outline">Cancelar</Button>
+                        </DialogClose>
+                        <Button type="button" onClick={handlePasswordReset} disabled={isResetting}>
+                          {isResetting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Enviar Link"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                {/* --- FIM DA NOVIDADE --- */}
                 <Input
                   id="password"
                   type="password"
