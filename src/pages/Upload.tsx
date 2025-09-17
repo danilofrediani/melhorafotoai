@@ -49,6 +49,7 @@ const PRESET_MAX_SIDE = 2048;
 const TARGET_MAX_BYTES = 7.5 * 1024 * 1024;
 
 export default function Upload() {
+  // ✅ CORREÇÃO: O nome da função foi corrigido de 'refetchProfile' para 'refreshProfile'
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -62,9 +63,9 @@ export default function Upload() {
   const dropRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (user && !profile) { refetchProfile(); }
+    if (user && !profile) { refreshProfile(); }
     if (profile && profile.default_category) { setCategory(profile.default_category); }
-  }, [user, profile, refetchProfile]);
+  }, [user, profile, refreshProfile]);
 
   useEffect(() => {
     const fetchProjectName = async () => {
@@ -77,6 +78,8 @@ export default function Upload() {
   }, [projectId, profile]);
 
   const remainingImages = profile?.remaining_images ?? 0;
+
+  // ... (O restante do arquivo permanece exatamente igual, pois a lógica estava correta)
 
   const getFileDimensions = (file: File): Promise<{ width: number; height: number }> => {
     return new Promise((resolve, reject) => {
@@ -338,10 +341,7 @@ export default function Upload() {
           throw new Error(error?.message || data.error || 'Erro na function');
         }
         
-        // --- ✅ CORREÇÃO APLICADA AQUI ✅ ---
-        // Usamos a URL pública que o back-end já nos enviou.
         const finalProcessedUrl = data.processed_url;
-        // --- FIM DA CORREÇÃO ---
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? ({
           ...img,
@@ -352,7 +352,8 @@ export default function Upload() {
 
         if (finalProcessedUrl) {
           toast.success(`"${imageToProcess.originalFile.name}" melhorada!`);
-          await refetchProfile();
+          // ✅ CORREÇÃO: O nome da função foi corrigido de 'refetchProfile' para 'refreshProfile'
+          await refreshProfile();
         } else {
           toast.error(`Falha no processamento de "${imageToProcess.originalFile.name}".`);
         }
