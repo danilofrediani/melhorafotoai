@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PackageProvider } from '@/contexts/PackageContext';
 import ReactGA from 'react-ga4';
@@ -40,14 +40,25 @@ const RouteTracker = () => {
   return null;
 };
 
+// ✅ Listener leve para eventos do Supabase (ex.: PASSWORD_RECOVERY)
+function PasswordRecoveryListener() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        navigate("/reset-password");
+      }
+    });
+    return () => sub?.subscription.unsubscribe();
+  }, [navigate]);
+  return null;
+}
+
 const App = () => {
-  // ✅ --- LÓGICA DE RECUPERAÇÃO DE SENHA SIMPLIFICADA E CORRIGIDA --- ✅
-  // Verificamos a URL diretamente na renderização, ANTES de qualquer useEffect.
-  // Isso garante que a página de Reset seja mostrada instantaneamente.
-  if (window.location.hash.includes('type=recovery')) {
-    return <ResetPassword />;
-  }
-  // --- FIM DA LÓGICA ---
+  // ❌ Removido o curto-circuito que renderizava <ResetPassword /> fora do Router
+  // if (window.location.hash.includes('type=recovery')) {
+  //   return <ResetPassword />;
+  // }
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -57,6 +68,7 @@ const App = () => {
             <Toaster />
             <BrowserRouter>
               <RouteTracker />
+              <PasswordRecoveryListener />
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route path="/login" element={<Login />} />
@@ -71,6 +83,10 @@ const App = () => {
                 <Route path="/privacidade" element={<Privacy />} />
                 <Route path="/faq" element={<Faq />} />
                 <Route path="/exclusao-de-conta" element={<ExclusaoDeConta />} />
+
+                {/* ✅ Rota específica para o fluxo de redefinição */}
+                <Route path="/reset-password" element={<ResetPassword />} />
+
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>
@@ -82,3 +98,4 @@ const App = () => {
 };
 
 export default App;
+

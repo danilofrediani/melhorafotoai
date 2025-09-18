@@ -54,7 +54,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Efeito 2: Busca o perfil do banco de dados SOMENTE quando o usuário muda.
   useEffect(() => {
-    // Se temos um usuário mas ainda não temos um perfil, buscamos.
     if (user && !profile) {
       setIsLoadingProfile(true);
       userService.ensureUserRecord(user)
@@ -69,10 +68,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingProfile(false);
         });
     } else if (!user) {
-      // Se o usuário faz logout, limpamos o perfil.
       setProfile(null);
     }
-  }, [user]); // Este efeito re-executa sempre que o objeto 'user' muda.
+  }, [user]);
 
   const handlePostLogin = async () => {
     const pendingPackageId = localStorage.getItem('pendingPurchasePackageId');
@@ -97,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: false, error: 'UNKNOWN_ERROR' };
     }
     if (data.user) {
-      await handlePostLogin(); // Chama a verificação de compra pendente após o login
+      await handlePostLogin();
       const dbUser = await userService.getUserById(data.user.id);
       return { success: true, role: dbUser?.user_type };
     }
@@ -135,7 +133,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => { await supabase.auth.signOut(); };
-  const resetPassword = async (email: string): Promise<boolean> => { const { error } = await supabase.auth.resetPasswordForEmail(email); return !error; };
+
+  // ✅ ÚNICA MUDANÇA: garante redirect direto para /reset-password
+  const resetPassword = async (email: string): Promise<boolean> => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://melhorafotoai.com.br/reset-password',
+    });
+    return !error;
+  };
 
   const value = {
     user,
@@ -149,7 +154,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resetPassword,
   };
 
-  // ✅ --- LINHA CORRIGIDA AQUI --- ✅
   return (<AuthContext.Provider value={value}>{children}</AuthContext.Provider>);
 }
 
@@ -158,3 +162,4 @@ export function useAuth() {
   if (context === undefined) { throw new Error('useAuth must be used within an AuthProvider'); }
   return context;
 }
+

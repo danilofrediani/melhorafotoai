@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,37 +19,49 @@ export default function ResetPassword() {
   const [pageState, setPageState] = useState<PageState>('loading');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    // Esta função agora lê o token diretamente da URL
-    // e dispara o evento PASSWORD_RECOVERY manualmente.
     const handlePasswordRecovery = async () => {
-      const hash = window.location.hash;
-      if (!hash) {
-        setError("Token de recuperação não encontrado. Por favor, use o link do seu e-mail.");
-        setPageState('error');
-        return;
-      }
-      
-      // O Supabase coloca o token no hash. Aqui nós o detectamos.
-      const { data: { session }, error: sessionError } = await supabase.auth.getSessionFromUrl({
-        storeSession: false
-      });
+      try {
+        const url = new URL(window.location.href);
 
-      if (sessionError || !session) {
-        console.error("Erro ao processar o link:", sessionError);
-        setError("O link de recuperação de senha é inválido ou expirou. Por favor, solicite um novo.");
+        // 1) Fluxo novo (PKCE): ?code=...
+        const code = url.searchParams.get('code');
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          setPageState('ready_to_update');
+          return;
+        }
+
+        // 2) Fluxo hash (legado): #...&type=recovery&access_token=...
+        if (url.hash.includes('type=recovery')) {
+          const { data, error } = await supabase.auth.getSessionFromUrl({
+            storeSession: true, // 👈 importante: mantém sessão para updateUser
+          });
+          if (error || !data?.session) throw error || new Error('Sessão inválida');
+          setPageState('ready_to_update');
+          return;
+        }
+
+        // 3) Fallback: talvez o listener já tenha criado a sessão
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          setPageState('ready_to_update');
+        } else {
+          setError("Token de recuperação não encontrado. Por favor, use o link do seu e-mail.");
+          setPageState('error');
+        }
+      } catch (e: any) {
+        console.error("Erro ao processar o link:", e);
+        setError(e?.message || "O link de recuperação de senha é inválido ou expirou. Por favor, solicite um novo.");
         setPageState('error');
-        return;
       }
-      
-      // Se o token é válido, estamos prontos para atualizar a senha.
-      setPageState('ready_to_update');
     };
-    
-    handlePasswordRecovery();
-  }, []);
 
+    handlePasswordRecovery();
+  }, [location.key]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,14 +79,11 @@ export default function ResetPassword() {
     setIsSubmitting(true);
     try {
       const { error: updateError } = await supabase.auth.updateUser({ password });
-
       if (updateError) {
         throw updateError;
       }
-
       toast.success('Senha redefinida com sucesso! Por favor, faça o login com sua nova senha.');
       navigate('/login');
-
     } catch (err: any) {
       console.error('Erro ao redefinir a senha:', err);
       setError('Não foi possível redefinir sua senha. O link pode ter expirado.');
@@ -135,3 +144,4 @@ export default function ResetPassword() {
     </div>
   );
 }
+
