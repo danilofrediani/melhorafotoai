@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { ImageIcon, LogOut, User, Upload, CreditCard, Settings, Loader2 } from 'lucide-react';
+import { ImageIcon, LogOut, User, Upload, CreditCard, Settings, Loader2, KeyRound } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,14 +68,36 @@ const Header = () => {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => navigate('/upload')}><Upload className="mr-2 h-4 w-4" /><span>Upload</span></DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate('/pricing')}><CreditCard className="mr-2 h-4 w-4" /><span>Comprar créditos</span></DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate(dashboardRoute)}><User className="mr-2 h-4 w-4" /><span>Dashboard</span></DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/upload')}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    <span>Upload</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/pricing')}>
+                    <CreditCard className="mr-2 h-4 w-4" />
+                    <span>Comprar créditos</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate(dashboardRoute)}>
+                    <User className="mr-2 h-4 w-4" />
+                    <span>Dashboard</span>
+                  </DropdownMenuItem>
+
+                  {/* ✅ NOVO: Trocar senha (leva para /reset-password, funcionará logado) */}
+                  <DropdownMenuItem onClick={() => navigate('/reset-password')}>
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    <span>Trocar senha</span>
+                  </DropdownMenuItem>
+
                   {profile?.user_type === 'admin' && (
-                    <DropdownMenuItem onClick={() => navigate('/admin')}><Settings className="mr-2 h-4 w-4" /><span>Admin</span></DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/admin')}>
+                      <Settings className="mr-2 h-4 w-4" />
+                      <span>Admin</span>
+                    </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout}><LogOut className="mr-2 h-4 w-4" /><span>Sair</span></DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleLogout}>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Sair</span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </>
@@ -92,3 +114,4 @@ const Header = () => {
 };
 
 export default Header;
+

@@ -31,7 +31,7 @@ export default function ResetPassword() {
         const hasCode = !!url.searchParams.get('code');
         const hasState = !!url.searchParams.get('state');
 
-        // 1) SEMPRE tentar primeiro: supabase lê hash OU query e cria sessão (recovery)
+        // 1) Tente sempre primeiro: Supabase lê hash OU query e cria a sessão (recovery)
         try {
           const { data, error } = await supabase.auth.getSessionFromUrl({
             storeSession: true,
@@ -41,7 +41,7 @@ export default function ResetPassword() {
             return;
           }
         } catch {
-          // ignoramos e tentamos o fallback
+          // ignoramos e seguimos para os fallbacks
         }
 
         // 2) Fallback apenas para fluxos OAuth (PKCE): ?code= & state, e NÃO é recovery
@@ -89,14 +89,29 @@ export default function ResetPassword() {
     setIsSubmitting(true);
     try {
       const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
+      if (updateError) {
+        const msg = (updateError.message || '').toLowerCase();
+
+        // Mensagens mais claras para o usuário
+        if (msg.includes('previously used password') || msg.includes('password has been used before')) {
+          setError('Você já utilizou essa senha recentemente. Escolha uma senha diferente.');
+        } else if (msg.includes('password') && msg.includes('should')) {
+          // Ex.: políticas de senha (quando disponíveis)
+          setError(`Não foi possível atualizar sua senha: ${updateError.message}`);
+        } else if (msg.includes('session') || msg.includes('token')) {
+          setError('Sessão inválida ou expirada. Abra o link do e-mail novamente para redefinir a senha.');
+        } else {
+          setError('Ocorreu um erro ao redefinir sua senha. Tente novamente.');
+        }
+        setIsSubmitting(false);
+        return;
+      }
 
       toast.success('Senha redefinida com sucesso! Por favor, faça o login com sua nova senha.');
       navigate('/login');
     } catch (err: any) {
       console.error('Erro ao redefinir a senha:', err);
-      setError('Não foi possível redefinir sua senha. O link pode ter expirado.');
-    } finally {
+      setError('Não foi possível redefinir sua senha. Abra o link do e-mail novamente.');
       setIsSubmitting(false);
     }
   };
@@ -155,7 +170,11 @@ export default function ResetPassword() {
                     disabled={isSubmitting}
                   />
                 </div>
-                <Button type="submit" className="w-full bg-gradient-fotoperfeita hover:opacity-90" disabled={isSubmitting}>
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-fotoperfeita hover:opacity-90"
+                  disabled={isSubmitting}
+                >
                   {isSubmitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Salvando...</>) : ('Salvar Nova Senha')}
                 </Button>
               </form>
