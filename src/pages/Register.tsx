@@ -10,6 +10,9 @@ import { Loader2, Gift } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
+// --- NOVO: utilitários de mensagens/validação
+import { isValidEmail, validatePasswordPolicy, mapAuthCodeToMessage } from '@/utils/authErros';
+
 export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -43,6 +46,7 @@ export default function Register() {
     e.preventDefault();
     setError('');
 
+    // --- Validações amigáveis antes de enviar ao Supabase ---
     if (!name || !email || !password || !confirmPassword) {
       setError('Por favor, preencha todos os campos');
       return;
@@ -51,37 +55,29 @@ export default function Register() {
       setError('As senhas não coincidem');
       return;
     }
-    if (password.length < 6) {
-      setError('A senha deve ter pelo menos 6 caracteres');
+    if (!isValidEmail(email)) {
+      setError('E-mail inválido. Verifique o formato (ex.: nome@dominio.com).');
+      return;
+    }
+    const pwIssues = validatePasswordPolicy(password); // mínimo 6 + letra + número
+    if (pwIssues.length) {
+      setError('Ajuste sua senha:\n• ' + pwIssues.join('\n• '));
       return;
     }
 
     const result = await register(email, password, name, 'basic');
     
     if (result.success) {
-      if (result.error === 'EMAIL_CONFIRMATION_REQUIRED') {
-        toast.info('Conta criada! Verifique seu e-mail para finalizar o cadastro.');
-      } else {
-        toast.success('Conta criada com sucesso!');
-      }
+      toast.success('Conta criada com sucesso!');
       navigate('/login');
     } else {
-      // --- LÓGICA DE ERRO INTELIGENTE ADICIONADA AQUI ---
-      const errorMessage = result.error?.message || 'Ocorreu um erro desconhecido.';
-      console.error("ERRO COMPLETO DO REGISTRO:", result.error);
-
-      // Mapeamento de erros conhecidos do Supabase para mensagens amigáveis
-      if (errorMessage.toLowerCase().includes('user already registered')) {
-        setError('Este e-mail já está cadastrado. Tente fazer login ou use outro e-mail.');
-      } else if (errorMessage.toLowerCase().includes('password should be at least 6 characters')) {
-        setError('Sua senha é muito curta. Por favor, use pelo menos 6 caracteres.');
-      } else if (errorMessage.toLowerCase().includes('weak password')) {
-          setError('Senha muito fraca. Tente usar uma combinação mais forte de letras, números e símbolos.');
+      if (result.error === 'EMAIL_ALREADY_IN_USE') {
+        setError(mapAuthCodeToMessage('EMAIL_ALREADY_IN_USE'));
+      } else if (result.error === 'REGISTRATION_FAILED') {
+        setError(mapAuthCodeToMessage('REGISTRATION_FAILED'));
       } else {
-        // Para qualquer outro erro inesperado, mostra a mensagem técnica
-        setError(`Ocorreu um erro: ${errorMessage}`);
+        setError(mapAuthCodeToMessage('UNKNOWN_ERROR'));
       }
-      // --- FIM DA LÓGICA DE ERRO ---
     }
   };
 
@@ -111,17 +107,37 @@ export default function Register() {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (<Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>)}
-              <div className="space-y-2"><Label htmlFor="name">Nome completo</Label><Input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome completo" disabled={loading} /></div>
-              <div className="space-y-2"><Label htmlFor="email">Email</Label><Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" disabled={loading} /></div>
-              <div className="space-y-2"><Label htmlFor="password">Senha</Label><Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" disabled={loading} /></div>
-              <div className="space-y-2"><Label htmlFor="confirmPassword">Confirmar senha</Label><Input id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Digite a senha novamente" disabled={loading} /></div>
+
+              <div className="space-y-2">
+                <Label htmlFor="name">Nome completo</Label>
+                <Input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome completo" disabled={loading} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" disabled={loading} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Senha</Label>
+                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres (letras e números)" disabled={loading} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirmar senha</Label>
+                <Input id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Digite a senha novamente" disabled={loading} />
+              </div>
+
               <Button type="submit" className="w-full bg-gradient-fotoperfeita hover:opacity-90" disabled={loading}>
                 {loading ? ( <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Criando conta...</> ) : ( 'Criar conta gratuitamente' )}
               </Button>
             </form>
 
             <div className="mt-6 text-center text-sm">
-              <p className="text-gray-600">Já tem uma conta?{' '}<Link to="/login" className="text-primary hover:underline font-medium">Faça login</Link></p>
+              <p className="text-gray-600">
+                Já tem uma conta?{' '}
+                <Link to="/login" className="text-primary hover:underline font-medium">Faça login</Link>
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -129,3 +145,4 @@ export default function Register() {
     </div>
   );
 }
+

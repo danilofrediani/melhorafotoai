@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-// --- NOVO: Importações para o Dialog ---
+// --- Dialog (recuperação de senha)
 import {
   Dialog,
   DialogContent,
@@ -21,26 +21,25 @@ import {
   DialogClose,
 } from "@/components/ui/dialog"
 
+// --- NOVO: utilitários de mensagens/validação
+import { isValidEmail, mapAuthCodeToMessage, friendlyFromUnknown } from '@/utils/authErros';
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login, isLoading, resetPassword } = useAuth(); // Adicionado resetPassword do contexto
+  const { login, isLoading, resetPassword } = useAuth();
   const navigate = useNavigate();
 
-  // --- NOVO: Estados para o formulário de recuperação ---
+  // Estados para o formulário de recuperação
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const redirectByRole = (role?: 'basic' | 'professional' | 'admin') => {
-    if (role === 'admin') {
-      navigate('/admin');
-    } else if (role === 'professional') {
-      navigate('/professional');
-    } else {
-      navigate('/dashboard');
-    }
+    if (role === 'admin') navigate('/admin');
+    else if (role === 'professional') navigate('/professional');
+    else navigate('/dashboard');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -51,6 +50,10 @@ export default function Login() {
       setError('Por favor, preencha todos os campos.');
       return;
     }
+    if (!isValidEmail(email)) {
+      setError('E-mail inválido. Verifique o formato (ex.: nome@dominio.com).');
+      return;
+    }
 
     try {
       const result = await login(email.trim().toLowerCase(), password);
@@ -59,21 +62,14 @@ export default function Login() {
         toast.success('Login realizado com sucesso!');
         redirectByRole(result.role);
       } else {
-        if (result.error === 'EMAIL_NOT_CONFIRMED') {
-          setError('Você precisa confirmar seu email antes de fazer login. Verifique sua caixa de entrada.');
-        } else if (result.error === 'INVALID_CREDENTIALS') {
-          setError('Email ou senha incorretos. Verifique suas credenciais e tente novamente.');
-        } else {
-          setError('Erro ao fazer login. Tente novamente ou entre em contato com o suporte.');
-        }
+        setError(mapAuthCodeToMessage(result.error));
       }
     } catch (err) {
       console.error('Unexpected error in handleSubmit:', err);
-      setError('Erro inesperado. Tente novamente.');
+      setError(friendlyFromUnknown(err));
     }
   };
 
-  // --- NOVO: Função para lidar com a recuperação de senha ---
   const handlePasswordReset = async () => {
     if (!recoveryEmail) {
       toast.error("Por favor, insira seu e-mail.");
@@ -85,7 +81,7 @@ export default function Login() {
     
     if (success) {
       toast.info("Se uma conta com este e-mail existir, um link de recuperação foi enviado.");
-      setDialogOpen(false); // Fecha o dialog em caso de sucesso
+      setDialogOpen(false);
       setRecoveryEmail('');
     } else {
       toast.error("Ocorreu um erro ao tentar enviar o e-mail. Tente novamente.");
@@ -134,7 +130,6 @@ export default function Login() {
               </div>
 
               <div className="space-y-2">
-                {/* --- NOVO: Label e link "Esqueci minha senha" --- */}
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Senha</Label>
                   <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -176,7 +171,6 @@ export default function Login() {
                     </DialogContent>
                   </Dialog>
                 </div>
-                {/* --- FIM DA NOVIDADE --- */}
                 <Input
                   id="password"
                   type="password"
@@ -217,3 +211,4 @@ export default function Login() {
     </div>
   );
 }
+
