@@ -41,36 +41,13 @@ const RouteTracker = () => {
 };
 
 const App = () => {
-  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
-
-  useEffect(() => {
-    // ✅ --- ESPIÃO INVISÍVEL ADICIONADO AQUI --- ✅
-    // Este log só será visível para você durante a depuração remota.
-    console.log('--- DIAGNÓSTICO DE URL ---');
-    console.log('URL Completa (href):', window.location.href);
-    console.log('Fragmento Hash (#):', window.location.hash);
-    console.log('--------------------------');
-    
-    const isRecovery = window.location.hash.includes('type=recovery');
-    if (isRecovery) {
-      setIsPasswordRecovery(true);
-      return; // Se já detectamos, não precisamos do listener
-    }
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setIsPasswordRecovery(true);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []); // Roda apenas uma vez, no carregamento inicial.
-
-  if (isPasswordRecovery) {
+  // ✅ --- LÓGICA DE RECUPERAÇÃO DE SENHA SIMPLIFICADA E CORRIGIDA --- ✅
+  // Verificamos a URL diretamente na renderização, ANTES de qualquer useEffect.
+  // Isso garante que a página de Reset seja mostrada instantaneamente.
+  if (window.location.hash.includes('type=recovery')) {
     return <ResetPassword />;
   }
+  // --- FIM DA LÓGICA ---
 
   return (
     <QueryClientProvider client={queryClient}>
