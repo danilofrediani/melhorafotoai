@@ -25,33 +25,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 import CameraPicker from '@/components/CameraPicker';
 
-// --- ✅ NOVA FUNÇÃO ASSISTENTE DE DOWNLOAD ✅ ---
-const forceDownload = async (url: string, filename: string) => {
-  try {
-    toast.info('Preparando download...');
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error('Não foi possível buscar a imagem para download.');
-    }
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    URL.revokeObjectURL(objectUrl);
-    toast.success('Download iniciado!');
-  } catch (error: any) {
-    console.error("Erro no download forçado:", error);
-    toast.error(error.message || 'Falha ao iniciar o download.');
-  }
-};
-// --- FIM DA FUNÇÃO ---
-
 interface ProcessResult {
   id: string;
   originalFile: File;
@@ -61,6 +34,7 @@ interface ProcessResult {
   category: string;
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'converting' | 'registering';
   processedUrl?: string | null;
+  processedPath?: string | null; // ✅ path real no bucket (p/ baixar via Edge e contar no backend)
   error?: string;
 }
 
@@ -86,10 +60,9 @@ export default function Upload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [category, setCategory] = useState('');
-  const [isDownloading, setIsDownloading] = useState(false); // Estado para o botão de download
+  const [isDownloading, setIsDownloading] = useState(false);
   const dropRef = useRef<HTMLDivElement | null>(null);
 
-  // ... (O resto dos seus hooks e funções permanece o mesmo)
   useEffect(() => {
     if (user && !profile) { refreshProfile(); }
     if (profile && profile.default_category) { setCategory(profile.default_category); }
@@ -303,6 +276,52 @@ export default function Upload() {
     return () => window.removeEventListener('paste', onPaste);
   }, [addFiles]);
 
+  // ==== Helpers de download via Edge (contabiliza no backend) ====
+
+  // Tenta extrair o path real "/<user>/<file>" de uma URL pública do Supabase
+  const extractProcessedPathFromUrl = (url: string): string | null => {
+    // URLs públicas costumam ter: /storage/v1/object/public/processed-images/<PATH>
+    const marker = '/processed-images/';
+    const idx = url.indexOf(marker);
+    if (idx === -1) return null;
+    return url.substring(idx + marker.length);
+  };
+
+  const downloadViaEdge = async (bucket: 'processed-images' | 'uploaded-images', path: string, filename: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { toast.error('Faça login para baixar.'); return; }
+
+    const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
+    const url = `${baseUrl}/functions/v1/download-image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
+    });
+
+    if (!res.ok) {
+      const msg = await res.text().catch(() => '');
+      console.error('download-image error:', msg);
+      toast.error('Falha ao baixar a imagem.');
+      return;
+    }
+
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(objectUrl);
+
+    // Atualiza perfil para refletir o novo download_count
+    refreshProfile().catch(() => {});
+  };
+
+  // ===============================================================
+
   const processImages = async () => {
     if (!category) return toast.error('Selecione uma categoria.');
     const pendingImages = processedImages.filter(p => p.status === 'pending');
@@ -367,12 +386,20 @@ export default function Upload() {
           throw new Error(error?.message || data.error || 'Erro na function');
         }
         
-        const finalProcessedUrl = data.processed_url;
+        const finalProcessedUrl: string | null = data.processed_url ?? null;
+        const finalProcessedPath: string | null =
+          data.processed_path ??
+          data.storage_path ??
+          data.processed_file_path ??
+          // fallback: tenta extrair do processed_url, se for URL pública do Supabase
+          (finalProcessedUrl ? extractProcessedPathFromUrl(finalProcessedUrl) : null) ??
+          null;
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? ({
           ...img,
           status: finalProcessedUrl ? 'completed' : 'error',
           processedUrl: finalProcessedUrl,
+          processedPath: finalProcessedPath,
           error: finalProcessedUrl ? undefined : 'A IA não retornou uma URL válida.'
         }) : img));
 
@@ -402,10 +429,39 @@ export default function Upload() {
     setProcessedImages([]);
   }
 
-  const handleDownloadClick = async (url: string, filename: string) => {
-    setIsDownloading(true);
-    await forceDownload(url, filename);
-    setIsDownloading(false);
+  // ✅ Agora conta no backend: tenta usar processedPath; se não tiver, extrai da URL pública.
+  const handleDownloadClick = async (url: string, filename: string, processedPath?: string | null) => {
+    try {
+      setIsDownloading(true);
+
+      const path =
+        processedPath ||
+        extractProcessedPathFromUrl(url);
+
+      if (path) {
+        // Baixa pelo backend (contabiliza)
+        await downloadViaEdge('processed-images', path, filename);
+      } else {
+        // Fallback (não recomendado): baixa direto da URL pública (não contabiliza)
+        console.warn('Sem processedPath — fallback para URL pública (não conta no backend).');
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Não foi possível buscar a imagem para download.');
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch (error: any) {
+      console.error("Erro no download:", error);
+      toast.error(error.message || 'Falha ao iniciar o download.');
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const pendingImagesCount = processedImages.filter(p => p.status === 'pending').length;
@@ -417,7 +473,7 @@ export default function Upload() {
       <Header />
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          {/* ... (resto do seu JSX do topo) ... */}
+          {/* Topo */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold mb-2">Upload de Imagens</h1>
             <p className="text-gray-600">Faça upload das suas imagens e veja a magia da nossa IA acontecer</p>
@@ -439,7 +495,8 @@ export default function Upload() {
               )}
             </div>
           </div>
-          {/* ... (resto do seu JSX do upload) ... */}
+
+          {/* Passo 1 */}
           {isDoneProcessing && pendingImagesCount === 0 ? (
              <Card className="mb-8 text-center">
                <CardHeader><CardTitle>Processamento Concluído</CardTitle></CardHeader>
@@ -504,6 +561,7 @@ export default function Upload() {
             </Card>
           )}
 
+          {/* Passo 2 */}
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>2. Escolha a categoria</CardTitle>
@@ -526,6 +584,7 @@ export default function Upload() {
             </CardContent>
           </Card>
           
+          {/* Botão Processar */}
           <div className="mb-8">
             <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || pendingImagesCount === 0 || !category}>
               {isProcessing ? (
@@ -535,63 +594,70 @@ export default function Upload() {
               )}
             </Button>
           </div>
+
+          {/* Resultados */}
           {processedImages.length > 0 && (
             <Card>
               <CardHeader><CardTitle>Resultados</CardTitle></CardHeader>
               <CardContent>
                 <div className="space-y-6">
-                  {processedImages.map((image) => (
-                    <div key={image.id} className="border rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-medium truncate pr-4">{image.originalFile.name}</h3>
-                        <div className="flex items-center space-x-2 flex-shrink-0">
-                          {image.status === 'pending' && <><ImageIcon className="h-4 w-4 text-gray-400" /><span className="text-sm text-gray-500">Pendente</span></>}
-                          {image.status === 'registering' && <><Loader2 className="h-4 w-4 animate-spin text-gray-500" /><span className="text-sm text-gray-500">Registrando...</span></>}
-                          {image.status === 'processing' && <><Loader2 className="h-4 w-4 animate-spin text-blue-500" /><span className="text-sm text-blue-500">Processando...</span></>}
-                          {image.status === 'completed' && <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-sm text-green-500">Concluído</span></>}
-                          {image.status === 'error' && <><AlertCircle className="h-4 w-4 text-red-500" /><span className="text-sm text-red-500">Erro</span></>}
+                  {processedImages.map((image) => {
+                    const baseName = image.originalFile.name.substring(0, image.originalFile.name.lastIndexOf('.')) || 'foto';
+                    const downloadName = `${baseName}_melhorada.png`;
+                    return (
+                      <div key={image.id} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="font-medium truncate pr-4">{image.originalFile.name}</h3>
+                          <div className="flex items-center space-x-2 flex-shrink-0">
+                            {image.status === 'pending' && <><ImageIcon className="h-4 w-4 text-gray-400" /><span className="text-sm text-gray-500">Pendente</span></>}
+                            {image.status === 'registering' && <><Loader2 className="h-4 w-4 animate-spin text-gray-500" /><span className="text-sm text-gray-500">Registrando...</span></>}
+                            {image.status === 'processing' && <><Loader2 className="h-4 w-4 animate-spin text-blue-500" /><span className="text-sm text-blue-500">Processando...</span></>}
+                            {image.status === 'completed' && <><CheckCircle className="h-4 w-4 text-green-500" /><span className="text-sm text-green-500">Concluído</span></>}
+                            {image.status === 'error' && <><AlertCircle className="h-4 w-4 text-red-500" /><span className="text-sm text-red-500">Erro</span></>}
+                          </div>
                         </div>
-                      </div>
-                      <div
-                        className="w-full bg-gray-100 rounded-lg border overflow-hidden"
-                        style={{ aspectRatio: `${image.width} / ${image.height}` }}
-                      >
-                        {image.status === 'completed' && image.processedUrl ? (
-                          <ReactCompareSlider
-                            itemOne={<ReactCompareSliderImage src={image.originalUrl} alt="Original" style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }} />}
-                            itemTwo={<ReactCompareSliderImage src={image.processedUrl} alt="Processado" style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }} />}
-                            className="w-full h-full"
-                          />
-                        ) : image.status === 'error' ? (
-                          <div className="text-red-500 text-center p-4">
-                            <AlertCircle className="h-8 w-8 mx-auto mb-2" />
-                            <p className="text-sm">{image.error || 'Ocorreu um erro desconhecido.'}</p>
-                          </div>
-                        ) : (
-                          <div className="relative w-full h-full">
-                            <img src={image.originalUrl} alt="Processando" className="w-full h-full object-contain" />
-                            {(image.status === 'uploading' || image.status === 'converting' || image.status === 'registering' || image.status === 'processing') && (
-                              <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
-                                <Loader2 className="h-10 w-10 animate-spin text-white" />
-                              </div>
-                            )}
-                          </div>
+
+                        <div
+                          className="w-full bg-gray-100 rounded-lg border overflow-hidden"
+                          style={{ aspectRatio: `${image.width} / ${image.height}` }}
+                        >
+                          {image.status === 'completed' && image.processedUrl ? (
+                            <ReactCompareSlider
+                              itemOne={<ReactCompareSliderImage src={image.originalUrl} alt="Original" style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }} />}
+                              itemTwo={<ReactCompareSliderImage src={image.processedUrl} alt="Processado" style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#fff" }} />}
+                              className="w-full h-full"
+                            />
+                          ) : image.status === 'error' ? (
+                            <div className="text-red-500 text-center p-4">
+                              <AlertCircle className="h-8 w-8 mx-auto mb-2" />
+                              <p className="text-sm">{image.error || 'Ocorreu um erro desconhecido.'}</p>
+                            </div>
+                          ) : (
+                            <div className="relative w-full h-full">
+                              <img src={image.originalUrl} alt="Processando" className="w-full h-full object-contain" />
+                              {(image.status === 'uploading' || image.status === 'converting' || image.status === 'registering' || image.status === 'processing') && (
+                                <div className="absolute inset-0 bg-black bg-opacity-25 flex items-center justify-center">
+                                  <Loader2 className="h-10 w-10 animate-spin text-white" />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      
+                        {/* ✅ Download via Edge (conta no backend) */}
+                        {image.status === 'completed' && image.processedUrl && (
+                          <Button
+                            className="mt-4 w-full"
+                            onClick={() => handleDownloadClick(image.processedUrl!, downloadName, image.processedPath)}
+                            disabled={isDownloading}
+                          >
+                            {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                            Download
+                          </Button>
                         )}
                       </div>
-                      
-                      {/* --- ✅ MUDANÇA APLICADA AQUI ✅ --- */}
-                      {image.status === 'completed' && image.processedUrl && (
-                        <Button 
-                          className="mt-4 w-full" 
-                          onClick={() => handleDownloadClick(image.processedUrl!, `${image.originalFile.name.substring(0, image.originalFile.name.lastIndexOf('.'))}_melhorada.png`)}
-                          disabled={isDownloading}
-                        >
-                          {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                          Download
-                        </Button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -601,3 +667,4 @@ export default function Upload() {
     </div>
   );
 }
+

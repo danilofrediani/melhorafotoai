@@ -8,31 +8,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ImageIcon, Upload, CreditCard, Download, Star, TrendingUp, History, Loader2, PlayCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { ProcessedImage, Transaction } from '@/lib/types';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { imageService, transactionService } from '@/lib/database';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-
-const forceDownload = async (url: string, filename: string) => {
-  try {
-    toast.info('Preparando download...');
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Não foi possível buscar a imagem para download.');
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(objectUrl);
-    toast.success('Download iniciado!');
-  } catch (error: any) {
-    console.error("Erro no download forçado:", error);
-    toast.error(error.message || 'Falha ao iniciar o download.');
-  }
-};
 
 const categoryEmoji = { 'alimentos': '🍕', 'produtos': '📦' };
 
@@ -60,82 +39,63 @@ export default function Dashboard() {
   // cooldown de 5s para botão de vídeo
   const [isRewardCooldown, setIsRewardCooldown] = useState(false);
 
-  // ===== Listener de recompensa (chama Edge Function e atualiza saldo) =====
+  // contador local (feedback imediato)
+  const [localDownloadIncrements, setLocalDownloadIncrements] = useState(0);
+
+  // ===== Listener de recompensa =====
   useEffect(() => {
     const onRewardGranted = async (evt: any) => {
       const amount = Number(evt?.detail?.amount ?? 1);
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          toast.error('Faça login para receber créditos.');
-          return;
-        }
-        const { data, error } = await supabase.functions.invoke('ad-reward', {
-          body: { amount, device_hint: 'rewarded-listener' }
-        });
+        if (!session) { toast.error('Faça login para receber créditos.'); return; }
+        const { data, error } = await supabase.functions.invoke('ad-reward', { body: { amount, device_hint: 'rewarded-listener' } });
         if (error) {
           const msg = (error as any)?.message || '';
-          if (msg.includes('DAILY_LIMIT')) {
-            toast.info('Você já ganhou todos os créditos gratuitos hoje. Volte amanhã!');
-          } else {
-            toast.error('Erro ao creditar recompensa.');
-          }
+          if (msg.includes('DAILY_LIMIT')) toast.info('Você já ganhou todos os créditos gratuitos hoje. Volte amanhã!');
+          else toast.error('Erro ao creditar recompensa.');
           console.error('[REWARD] erro:', error);
           return;
         }
         toast.success(`+${amount} crédito(s) adicionados!`);
         await refreshProfile();
-        console.log('[REWARD] ok:', data);
       } catch (e) {
         console.error('[REWARD] exceção:', e);
         toast.error('Não foi possível registrar o crédito.');
       }
     };
-
     window.addEventListener('REWARD_GRANTED', onRewardGranted as EventListener);
-    console.log('Listener REWARD_GRANTED instalado.');
     return () => window.removeEventListener('REWARD_GRANTED', onRewardGranted as EventListener);
   }, [refreshProfile]);
-  // =======================================================================
 
-  useEffect(() => {
-    if (user && !profile) {
-      refreshProfile();
-    }
-  }, [user, profile, refreshProfile]);
+  useEffect(() => { if (user && !profile) refreshProfile(); }, [user, profile, refreshProfile]);
 
   useEffect(() => {
     const loadPageData = async () => {
-      if (profile) {
-        setIsLoadingPageData(true);
-        try {
-          const imagesPromise = imageService.getProcessedImagesForUser(profile.id);
-          const transactionsPromise = transactionService.getTransactionsForUser(profile.id);
-          const [images, userTransactions] = await Promise.all([imagesPromise, transactionsPromise]);
-          setImageHistory(images as ProcessedImageWithOriginal[]);
-          setTransactions(userTransactions);
-        } catch (error) {
-          toast.error("Erro ao carregar os dados do painel.");
-          console.error(error);
-        } finally {
-          setIsLoadingPageData(false);
-        }
+      if (!profile) return;
+      setIsLoadingPageData(true);
+      try {
+        const [images, userTransactions] = await Promise.all([
+          imageService.getProcessedImagesForUser(profile.id),
+          transactionService.getTransactionsForUser(profile.id),
+        ]);
+        setImageHistory(images as ProcessedImageWithOriginal[]);
+        setTransactions(userTransactions);
+      } catch (error) {
+        toast.error("Erro ao carregar os dados do painel.");
+        console.error(error);
+      } finally {
+        setIsLoadingPageData(false);
       }
     };
     loadPageData();
   }, [profile]);
 
-  // ===== Regra: esconder anúncios se já comprou e tem saldo > 0 =====
+  // ===== Regra de anúncios =====
   const hasAnyPurchase = transactions.length > 0;
   const hasBalance = (profile?.remaining_images ?? 0) > 0;
   const showAds = !(hasAnyPurchase && hasBalance);
-
-  useEffect(() => {
-    try {
-      window.MFBridge?.setAdsEnabled?.(showAds);
-    } catch {}
-  }, [showAds]);
-  // ===================================================================
+  useEffect(() => { try { window.MFBridge?.setAdsEnabled?.(showAds); } catch {} }, [showAds]);
 
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'N/A';
@@ -147,17 +107,13 @@ export default function Dashboard() {
   const friendlyTitle = (img: ProcessedImageWithOriginal): string => {
     const raw = img.uploaded_images?.original_filename || '';
     const created = new Date(img.created_at ?? Date.now());
-    const when = created.toLocaleString('pt-BR', {
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
+    const when = created.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     if (!raw) return `Foto ${when}`;
     const base = raw.replace(/\.[^/.]+$/, '');
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base);
+    const isUUID = /^[0-9a-f-]{36}$/i.test(base);
     const isLongHash = /^[A-Za-z0-9_-]{20,}$/.test(base);
     const isDigits = /^\d{12,}$/.test(base);
-    const isCameraPattern =
-      /^PXL_\d{8}_\d{6}/.test(base) || /^IMG_\d{8}_\d{6}/.test(base) || /^image-\d+/.test(base);
+    const isCameraPattern = /^PXL_\d{8}_\d{6}/.test(base) || /^IMG_\d{8}_\d{6}/.test(base) || /^image-\d+/.test(base);
     if (isUUID || isLongHash || isDigits || isCameraPattern) return `Foto ${when}`;
     if (base.length > 40) return base.slice(0, 37) + '...';
     return base;
@@ -166,6 +122,76 @@ export default function Dashboard() {
   const friendlyDownloadName = (img: ProcessedImageWithOriginal): string => {
     const title = friendlyTitle(img).replace(/[^\p{L}\p{N}\s._-]/gu, '');
     return `${title}_melhorada.png`;
+  };
+
+  // ✅ Download via Edge Function (conta no backend)
+  const downloadViaEdge = useCallback(
+    async (bucket: 'processed-images' | 'uploaded-images', path: string, filename: string) => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error('Faça login para baixar.'); return; }
+
+      const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
+      const url = `${baseUrl}/functions/v1/download-image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
+
+      // chama a Edge Function e baixa o binário
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        console.error('download-image error:', msg);
+        toast.error('Falha ao baixar a imagem.');
+        return;
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+    },
+    []
+  );
+
+  // Chamador com contagem imediata + refresh
+  const handleDownloadClick = async (pathPublicUrl: string, filename: string, opts?: { source?: 'dashboard' | 'upload', imageId?: string, storagePath?: string }) => {
+    setIsDownloading(true);
+    try {
+      // extrai o storagePath se não veio pronto
+      const storagePath = opts?.storagePath ?? (() => {
+        // quando usamos getPublicUrl, ele não traz o path. Melhor manter o path salvo na imagem (processed_file_path).
+        // Aqui, como no seu histórico você já tem image.processed_file_path, passamos via opts.storagePath lá embaixo.
+        return '';
+      })();
+
+      if (!storagePath) {
+        // fallback antigo (não conta no backend) — ideal é sempre passarmos storagePath
+        console.warn('Sem storagePath — use processed_file_path para contar corretamente.');
+        toast.info('Preparando download...');
+        const resp = await fetch(pathPublicUrl);
+        const blob = await resp.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+      } else {
+        // Baixa pelo backend (contabiliza)
+        await downloadViaEdge('processed-images', storagePath, filename);
+        // feedback imediato na UI
+        setLocalDownloadIncrements(n => n + 1);
+        refreshProfile().catch(() => {});
+      }
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   if (isLoadingProfile || (user && !profile)) {
@@ -191,15 +217,11 @@ export default function Dashboard() {
     )
   }
 
-  const handleDownloadClick = async (url: string, filename: string) => {
-    setIsDownloading(true);
-    await forceDownload(url, filename);
-    setIsDownloading(false);
-  };
-
   const totalImagesProcessed = imageHistory.length;
   // @ts-ignore
-  const totalDownloads = profile.download_count ?? 0;
+  const totalDownloadsFromProfile = profile.download_count ?? 0;
+  const totalDownloads = totalDownloadsFromProfile + localDownloadIncrements;
+
   const categoryStats = imageHistory.reduce((acc, img) => {
     if (img.processing_type) { acc[img.processing_type] = (acc[img.processing_type] || 0) + 1; }
     return acc;
@@ -230,7 +252,6 @@ export default function Dashboard() {
                 <Link to="/pricing"><CreditCard className="mr-2 h-4 w-4" />Comprar Planos ou Créditos</Link>
               </Button>
 
-              {/* Botão de vídeo com cooldown */}
               {showAds && (
                 <Button
                   variant="secondary"
@@ -321,7 +342,7 @@ export default function Dashboard() {
               <TrendingUp className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{totalImagesProcessed}</div>
+              <div className="text-2xl font-bold">{imageHistory.length}</div>
               <p className="text-xs text-muted-foreground">Total de imagens melhoradas</p>
             </CardContent>
           </Card>
@@ -342,10 +363,24 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {mostUsedCategory ? categoryEmoji[mostUsedCategory[0] as keyof typeof categoryEmoji] : '📷'}
+                {(() => {
+                  const stats = imageHistory.reduce((acc, img) => {
+                    if (img.processing_type) { acc[img.processing_type] = (acc[img.processing_type] || 0) + 1; }
+                    return acc;
+                  }, {} as Record<string, number>);
+                  const top = Object.entries(stats).sort(([, a], [, b]) => b - a)[0];
+                  return top ? (categoryEmoji[top[0] as keyof typeof categoryEmoji] || '📷') : '📷';
+                })()}
               </div>
               <p className="text-xs text-muted-foreground">
-                {mostUsedCategory ? `${mostUsedCategory[0]} (${mostUsedCategory[1]})` : 'Nenhuma'}
+                {(() => {
+                  const stats = imageHistory.reduce((acc, img) => {
+                    if (img.processing_type) { acc[img.processing_type] = (acc[img.processing_type] || 0) + 1; }
+                    return acc;
+                  }, {} as Record<string, number>);
+                  const top = Object.entries(stats).sort(([, a], [, b]) => b - a)[0];
+                  return top ? `${top[0]} (${top[1]})` : 'Nenhuma';
+                })()}
               </p>
             </CardContent>
           </Card>
@@ -384,7 +419,11 @@ export default function Dashboard() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleDownloadClick(publicURL, downloadName)}
+                        onClick={() => handleDownloadClick(publicURL, downloadName, {
+                          source: 'dashboard',
+                          imageId: image.id,
+                          storagePath: image.processed_file_path || '' // ✅ passa o path real do storage
+                        })}
                         disabled={isDownloading}
                       >
                         {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
