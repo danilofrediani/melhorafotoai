@@ -1,5 +1,5 @@
 // src/pages/Pricing.tsx
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { Card } from '@/components/ui/card';
@@ -21,10 +21,12 @@ import { useIsTwa } from '@/hooks/useIsTwa';
 const PLAY_SKUS = ['credits_10', 'credits_20', 'credits_50'] as const;
 
 const googlePlayProductMap: Record<string, Partial<PackageType>> = {
-  credits_10: { images: 10, price: 12.9, description: '10 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: false },
-  credits_20: { images: 20, price: 25.9, description: '20 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: true },
-  credits_50: { images: 50, price: 59.9, description: '50 créditos para edição\nQualidade Profissional\nSuporte Prioritário', is_most_popular: false },
+  credits_10: { images: 10, price: 57.0, description: '10 créditos para transformar suas fotos.\nIdeal para destacar seus principais produtos ou pratos.\nIluminação profissional e sombras realistas.', is_most_popular: false },
+  credits_20: { images: 20, price: 97.0, description: '20 créditos para transformar suas fotos.\nQualidade Profissional.\nSuporte via E-mail.', is_most_popular: true },
+  credits_50: { images: 50, price: 197.0, description: '50 créditos para transformar suas fotos.\nSuporte Prioritário.', is_most_popular: false },
 };
+
+const PENDING_SKU_KEY = 'pendingPurchaseSku';
 
 const getIcon = (type: string) => {
   if (type === 'mensal') return <Star className="w-8 h-8 text-[#2BC2C9]" />;
@@ -41,12 +43,15 @@ export default function Pricing() {
   const navigate = useNavigate();
   const isTwaMode = useIsTwa();
 
+  // evita múltiplos re-disparos da retomada pós-login
+  const resumeTriedRef = useRef(false);
+
   // Carrega pacotes (Stripe no web / estáticos no app)
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       if (isTwaMode) {
-        const transformed = PLAY_SKUS.map((sku) => {
+        const transformed = (PLAY_SKUS.map((sku) => {
           const meta = googlePlayProductMap[sku] || {};
           return {
             id: sku,
@@ -60,7 +65,7 @@ export default function Pricing() {
             is_active: true,
             google_play_sku: sku,
           } as PackageType;
-        });
+        }));
         setDisplayPackages(transformed);
         setLoading(false);
       } else {
@@ -77,12 +82,34 @@ export default function Pricing() {
     loadData();
   }, [isTwaMode]);
 
+  // Retomar compra automaticamente após login (somente TWA)
+  useEffect(() => {
+    if (!isTwaMode) return;
+    if (!profile) return; // só retoma se estiver logado
+    if (resumeTriedRef.current) return;
+
+    const pendingSku = localStorage.getItem(PENDING_SKU_KEY);
+    if (pendingSku && PLAY_SKUS.includes(pendingSku as any)) {
+      resumeTriedRef.current = true;
+      localStorage.removeItem(PENDING_SKU_KEY);
+      const pkg = displayPackages.find(p => p.google_play_sku === pendingSku || p.id === pendingSku);
+      if (pkg) {
+        toast.info('Retomando sua compra no Google Play…');
+        // pequena defasagem para garantir que a página está pronta
+        setTimeout(() => {
+          handleGooglePlayPurchase(pkg);
+        }, 400);
+      }
+    }
+  }, [profile, isTwaMode, displayPackages]);
+
   // ==========================
   // Handlers
   // ==========================
   const handleStripePurchase = async (pkg: PackageType) => {
     if (!profile) {
       localStorage.setItem('pendingPurchasePackageId', pkg.id);
+      toast.info('Entre ou crie sua conta para continuar o pagamento.');
       navigate('/login');
       return;
     }
@@ -90,20 +117,31 @@ export default function Pricing() {
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: { package_id: pkg.id },
+        headers: await authHeader(),
       });
-      if (error || data?.error) throw new Error(error?.message || data?.error || 'Não foi possível iniciar o pagamento.');
-      if (data?.checkout_url) window.location.href = data.checkout_url;
+      if (error || (data as any)?.error) throw new Error(error?.message || (data as any)?.error || 'Não foi possível iniciar o pagamento.');
+      if ((data as any)?.checkout_url) window.location.href = (data as any).checkout_url;
       else throw new Error('URL de checkout não recebida.');
     } catch (err: any) {
       toast.error(`Falha: ${err.message}`);
+      console.error('[Pricing] create-checkout-session erro', err);
     } finally {
       setIsPurchasingId(null);
     }
   };
 
+  // Helper para Authorization header
+  const authHeader = async () => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const handleGooglePlayPurchase = async (pkg: PackageType) => {
+    // precisa estar logado
     if (!profile) {
-      toast.info('Você precisa estar logado para comprar.');
+      localStorage.setItem(PENDING_SKU_KEY, pkg.google_play_sku || pkg.id);
+      toast.info('Entre ou crie sua conta para continuar a compra.');
       navigate('/login');
       return;
     }
@@ -114,45 +152,59 @@ export default function Pricing() {
       return;
     }
 
+    if (!(window as any).MFBridge?.buyCredits) {
+      toast.error('Abra pelo aplicativo (TWA) para comprar no Google Play.');
+      return;
+    }
+
     setIsPurchasingId(pkg.id);
 
     try {
       console.log('[Pricing] Chamando MFBridge.buyCredits', skuToSend);
-      (window as any).MFBridge?.buyCredits(skuToSend);
-      toast.info('Abrindo compra no Google Play...');
+      (window as any).MFBridge.buyCredits(skuToSend);
+      toast.info('Abrindo compra no Google Play…');
 
-      const listener = async (e: any) => {
-        const { sku, purchaseToken } = e.detail || {};
-        console.log('[Pricing] PURCHASE_COMPLETED event', e.detail);
-
-        if (sku && purchaseToken) {
-          toast.success('Compra aprovada. Validando...');
-          try {
-            const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
-              body: { sku, purchaseToken },
-              headers: { Authorization: `Bearer ${profile?.access_token}` },
-            });
-
-            console.log('[Pricing] verify-play-purchase retorno', { data, error });
-
-            if (error || data?.error) {
-              toast.error('Falha na validação com Google Play.');
-            } else {
-              toast.success('Créditos adicionados com sucesso!');
-              await refreshProfile?.();
-              navigate('/dashboard');
-            }
-          } catch (err: any) {
-            console.error('[Pricing] Erro inesperado ao chamar verify-play-purchase', err);
-            toast.error(`Erro inesperado: ${err.message}`);
+      // Listener de retorno — usa { once: true } e cleanup
+      const onCompleted = async (e: any) => {
+        try {
+          const { sku, purchaseToken, source } = e?.detail || {};
+          console.log('[Pricing] PURCHASE_COMPLETED', { sku, source });
+          if (!sku || !purchaseToken) {
+            toast.error('Retorno inválido da compra.');
+            return;
           }
-        }
 
-        window.removeEventListener('PURCHASE_COMPLETED', listener);
+          toast.success('Compra aprovada. Validando…');
+
+          // Envia para a Edge Function com Authorization
+          const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
+            body: { sku, purchaseToken },
+            headers: await authHeader(),
+          });
+
+          console.log('[Pricing] verify-play-purchase retorno', { data, error });
+
+          if (error || (data as any)?.error) {
+            toast.error('Falha na validação com Google Play.');
+            console.error('[Pricing] verify-play-purchase erro', error || (data as any)?.error);
+            return;
+          }
+
+          toast.success('Créditos adicionados com sucesso!');
+          await refreshProfile?.();
+          navigate('/dashboard');
+        } catch (err: any) {
+          console.error('[Pricing] Erro no onCompleted', err);
+          toast.error('Não foi possível concluir a validação.');
+        } finally {
+          window.removeEventListener('PURCHASE_COMPLETED', onCompleted as any);
+        }
       };
 
-      window.addEventListener('PURCHASE_COMPLETED', listener);
+      window.addEventListener('PURCHASE_COMPLETED', onCompleted as any, { once: true });
+
     } catch (err: any) {
+      console.error('[Pricing] Erro inesperado ao iniciar compra', err);
       toast.error(`Erro inesperado: ${err.message}`);
     } finally {
       setIsPurchasingId(null);
@@ -162,18 +214,9 @@ export default function Pricing() {
   // ==========================
   // Renderização
   // ==========================
-  const avulsoPackages = useMemo(
-    () => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.price - b.price),
-    [displayPackages]
-  );
-  const mensalPackages = useMemo(
-    () => displayPackages.filter((p) => p.type === 'mensal').sort((a, b) => a.price - b.price),
-    [displayPackages]
-  );
-  const profissionalPackages = useMemo(
-    () => displayPackages.filter((p) => p.type === 'profissional').sort((a, b) => a.price - b.price),
-    [displayPackages]
-  );
+  const avulsoPackages = useMemo(() => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.price - b.price), [displayPackages]);
+  const mensalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'mensal').sort((a, b) => a.price - b.price), [displayPackages]);
+  const profissionalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'profissional').sort((a, b) => a.price - b.price), [displayPackages]);
 
   const getFirstAvailableTab = () => {
     if (avulsoPackages.length > 0) return 'avulso';
@@ -199,9 +242,7 @@ export default function Pricing() {
     return (
       <Card
         key={pkg.id}
-        className={`relative text-left p-8 flex flex-col items-center text-center ${
-          pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : ''
-        }`}
+        className={`relative text-left p-8 flex flex-col items-center text-center ${pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : ''}`}
       >
         {pkg.is_most_popular && (
           <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -241,6 +282,7 @@ export default function Pricing() {
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-4xl font-bold mb-4">Escolha o pacote ideal para você</h1>
         <p className="text-lg text-gray-600 mb-12">Preços justos para qualquer necessidade.</p>
+
         {firstAvailableTab ? (
           <Tabs defaultValue={firstAvailableTab} className="w-full">
             <TabsList className="mx-auto mb-8">
@@ -248,22 +290,34 @@ export default function Pricing() {
               {!isTwaMode && mensalPackages.length > 0 && <TabsTrigger value="mensal">Planos Mensais</TabsTrigger>}
               {!isTwaMode && profissionalPackages.length > 0 && <TabsTrigger value="profissional">Planos Profissionais</TabsTrigger>}
             </TabsList>
+
             <TabsContent value="avulso">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">{avulsoPackages.map(renderPackageCard)}</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                {avulsoPackages.map(renderPackageCard)}
+              </div>
             </TabsContent>
+
             {!isTwaMode && (
               <>
                 <TabsContent value="mensal">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">{mensalPackages.map(renderPackageCard)}</div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                    {mensalPackages.map(renderPackageCard)}
+                  </div>
                 </TabsContent>
                 <TabsContent value="profissional">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">{profissionalPackages.map(renderPackageCard)}</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+                    {profissionalPackages.map(renderPackageCard)}
+                  </div>
                 </TabsContent>
               </>
             )}
           </Tabs>
         ) : (
-          !finalLoading && <p className="text-gray-600 col-span-3 text-center py-10">Nenhum pacote disponível no momento.</p>
+          !finalLoading && (
+            <p className="text-gray-600 col-span-3 text-center py-10">
+              Nenhum pacote disponível no momento.
+            </p>
+          )
         )}
       </div>
       <Footer />
