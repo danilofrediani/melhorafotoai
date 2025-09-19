@@ -57,6 +57,9 @@ export default function Dashboard() {
   const [isLoadingPageData, setIsLoadingPageData] = useState(true);
   const [isDownloading, setIsDownloading] = useState(false);
 
+  // cooldown de 5s para botão de vídeo
+  const [isRewardCooldown, setIsRewardCooldown] = useState(false);
+
   // ===== Listener de recompensa (chama Edge Function e atualiza saldo) =====
   useEffect(() => {
     const onRewardGranted = async (evt: any) => {
@@ -73,7 +76,7 @@ export default function Dashboard() {
         if (error) {
           const msg = (error as any)?.message || '';
           if (msg.includes('DAILY_LIMIT')) {
-            toast.error('Limite diário de recompensas atingido.');
+            toast.info('Você já ganhou todos os créditos gratuitos hoje. Volte amanhã!');
           } else {
             toast.error('Erro ao creditar recompensa.');
           }
@@ -125,9 +128,8 @@ export default function Dashboard() {
   // ===== Regra: esconder anúncios se já comprou e tem saldo > 0 =====
   const hasAnyPurchase = transactions.length > 0;
   const hasBalance = (profile?.remaining_images ?? 0) > 0;
-  const showAds = !(hasAnyPurchase && hasBalance); // true = mostrar ads, false = ocultar ads
+  const showAds = !(hasAnyPurchase && hasBalance);
 
-  // avisa o app Android (TWA/WebView) para mostrar/ocultar o banner
   useEffect(() => {
     try {
       window.MFBridge?.setAdsEnabled?.(showAds);
@@ -228,11 +230,12 @@ export default function Dashboard() {
                 <Link to="/pricing"><CreditCard className="mr-2 h-4 w-4" />Comprar Planos ou Créditos</Link>
               </Button>
 
-              {/* Botão de vídeo: aparece SOMENTE quando showAds = true */}
+              {/* Botão de vídeo com cooldown */}
               {showAds && (
                 <Button
                   variant="secondary"
                   className="w-full"
+                  disabled={isRewardCooldown}
                   onClick={() => {
                     if (!window.MFBridge?.requestReward) {
                       toast.info('Esse recurso está disponível no app Android.');
@@ -240,6 +243,8 @@ export default function Dashboard() {
                     }
                     try {
                       window.MFBridge.requestReward(1);
+                      setIsRewardCooldown(true);
+                      setTimeout(() => setIsRewardCooldown(false), 5000);
                     } catch (err) {
                       console.error(err);
                       toast.error('Não foi possível iniciar o anúncio.');
@@ -247,7 +252,7 @@ export default function Dashboard() {
                   }}
                 >
                   <PlayCircle className="mr-2 h-4 w-4" />
-                  Ganhar 1 crédito assistindo vídeo
+                  {isRewardCooldown ? "Aguarde..." : "Ganhar 1 crédito assistindo vídeo"}
                 </Button>
               )}
 
@@ -298,6 +303,7 @@ export default function Dashboard() {
           </Card>
         </div>
 
+        {/* Métricas rápidas */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -345,6 +351,7 @@ export default function Dashboard() {
           </Card>
         </div>
 
+        {/* Histórico de imagens */}
         <Card>
           <CardHeader>
             <CardTitle>Histórico de Imagens</CardTitle>

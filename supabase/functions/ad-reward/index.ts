@@ -43,9 +43,10 @@ serve(async (req) => {
     const amount = Math.max(1, Math.min(5, Number(body.amount ?? 1)));
     const deviceHint = (body.device_hint ?? "").slice(0, 100);
 
-    // 3) Limite diário (2/dia)
-    const LIMIT_PER_DAY = 5;
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    // 3) Limite diário (3/dia)
+    const LIMIT_PER_DAY = 3;
+    const todayStart = new Date();
+    todayStart.setHours(todayStart.getHours() - 24); // últimas 24h rolling window
 
     const { data: todayRows, error: countErr } = await admin
       .from("ad_rewards")
@@ -56,7 +57,8 @@ serve(async (req) => {
     if (countErr && (countErr as any).code === "42P01") {
       // tabela de log ainda não existe
       return new Response(JSON.stringify({ ok: false, error: "TABLE_MISSING" }), {
-        status: 500, headers: { "Content-Type": "application/json", ...CORS },
+        status: 500,
+        headers: { "Content-Type": "application/json", ...CORS },
       });
     }
 
@@ -65,44 +67,58 @@ serve(async (req) => {
 
     if (grantedToday + amount > LIMIT_PER_DAY) {
       return new Response(
-        JSON.stringify({ ok:false, reason:"DAILY_LIMIT", grantedToday, limit: LIMIT_PER_DAY }),
+        JSON.stringify({
+          ok: false,
+          reason: "DAILY_LIMIT",
+          grantedToday,
+          limit: LIMIT_PER_DAY,
+        }),
         { status: 429, headers: { "Content-Type": "application/json", ...CORS } }
       );
     }
 
     // 4) Log
     const { error: insErr } = await admin.from("ad_rewards").insert({
-      user_id: user.id, amount, device_hint: deviceHint || null,
+      user_id: user.id,
+      amount,
+      device_hint: deviceHint || null,
     });
     if (insErr) {
-      return new Response(JSON.stringify({ ok:false, error:"DB_ERROR", details: insErr }),
-        { status: 500, headers: { "Content-Type":"application/json", ...CORS }});
+      return new Response(
+        JSON.stringify({ ok: false, error: "DB_ERROR", details: insErr }),
+        { status: 500, headers: { "Content-Type": "application/json", ...CORS } }
+      );
     }
 
     // 5) Incrementa saldo em public.users.remaining_images (RPC atômico)
     const { data: incData, error: incErr } = await admin.rpc(
       "increment_remaining_images_users",
-      { p_user_id: user.id, p_delta: amount },
+      { p_user_id: user.id, p_delta: amount }
     );
     if (incErr) {
       if ((incErr as any).code === "42883") {
         // função não existe ainda
-        return new Response(JSON.stringify({ ok:false, error:"RPC_MISSING" }), {
-          status: 500, headers: { "Content-Type":"application/json", ...CORS },
+        return new Response(JSON.stringify({ ok: false, error: "RPC_MISSING" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", ...CORS },
         });
       }
-      return new Response(JSON.stringify({ ok:false, error:"DB_ERROR", details: incErr }),
-        { status: 500, headers: { "Content-Type":"application/json", ...CORS }});
+      return new Response(
+        JSON.stringify({ ok: false, error: "DB_ERROR", details: incErr }),
+        { status: 500, headers: { "Content-Type": "application/json", ...CORS } }
+      );
     }
 
     const newBalance = incData as number;
-    return new Response(JSON.stringify({ ok:true, amount, newBalance }), {
-      status: 200, headers: { "Content-Type":"application/json", ...CORS },
+    return new Response(JSON.stringify({ ok: true, amount, newBalance }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
     });
   } catch (e) {
     console.error(e);
-    return new Response(JSON.stringify({ error:"INTERNAL" }), {
-      status: 500, headers: { "Content-Type":"application/json", ...CORS },
+    return new Response(JSON.stringify({ error: "INTERNAL" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", ...CORS },
     });
   }
 });
