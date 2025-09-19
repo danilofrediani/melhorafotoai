@@ -40,6 +40,15 @@ type ProcessedImageWithOriginal = ProcessedImage & {
   uploaded_images: { original_filename: string } | null;
 };
 
+declare global {
+  interface Window {
+    MFBridge?: {
+      requestReward?: (amount: number) => void;
+      setAdsEnabled?: (enabled: boolean) => void;
+    };
+  }
+}
+
 export default function Dashboard() {
   const { user, profile, refreshProfile, isLoading: isLoadingProfile } = useAuth();
 
@@ -48,7 +57,7 @@ export default function Dashboard() {
   const [isLoadingPageData, setIsLoadingPageData] = useState(true);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // =============== LISTENER DE RECOMPENSA (já validado) ===============
+  // ===== Listener de recompensa (chama Edge Function e atualiza saldo) =====
   useEffect(() => {
     const onRewardGranted = async (evt: any) => {
       const amount = Number(evt?.detail?.amount ?? 1);
@@ -62,14 +71,17 @@ export default function Dashboard() {
           body: { amount, device_hint: 'rewarded-listener' }
         });
         if (error) {
-          // Pode ser DAILY_LIMIT ou outro — já vem no body
-          const msg = (error as any)?.message || 'Erro ao creditar recompensa.';
+          const msg = (error as any)?.message || '';
+          if (msg.includes('DAILY_LIMIT')) {
+            toast.error('Limite diário de recompensas atingido.');
+          } else {
+            toast.error('Erro ao creditar recompensa.');
+          }
           console.error('[REWARD] erro:', error);
-          toast.error(msg.includes('DAILY_LIMIT') ? 'Limite diário de recompensas atingido.' : 'Erro ao creditar recompensa.');
           return;
         }
         toast.success(`+${amount} crédito(s) adicionados!`);
-        await refreshProfile(); // atualiza o card de saldo
+        await refreshProfile();
         console.log('[REWARD] ok:', data);
       } catch (e) {
         console.error('[REWARD] exceção:', e);
@@ -81,7 +93,7 @@ export default function Dashboard() {
     console.log('Listener REWARD_GRANTED instalado.');
     return () => window.removeEventListener('REWARD_GRANTED', onRewardGranted as EventListener);
   }, [refreshProfile]);
-  // ====================================================================
+  // =======================================================================
 
   useEffect(() => {
     if (user && !profile) {
@@ -110,11 +122,18 @@ export default function Dashboard() {
     loadPageData();
   }, [profile]);
 
-  // ======== REGRA DE EXIBIÇÃO DE ANÚNCIOS (SEM "professional") ========
-  const hasAnyPurchase = transactions.length > 0;                 // já comprou alguma vez?
-  const hasBalance = (profile?.remaining_images ?? 0) > 0;         // tem saldo atual?
-  const showAds = !(hasAnyPurchase && hasBalance);                 // TRUE → mostrar anúncios/botão; FALSE → esconder (ad-free)
-  // ====================================================================
+  // ===== Regra: esconder anúncios se já comprou e tem saldo > 0 =====
+  const hasAnyPurchase = transactions.length > 0;
+  const hasBalance = (profile?.remaining_images ?? 0) > 0;
+  const showAds = !(hasAnyPurchase && hasBalance); // true = mostrar ads, false = ocultar ads
+
+  // avisa o app Android (TWA/WebView) para mostrar/ocultar o banner
+  useEffect(() => {
+    try {
+      window.MFBridge?.setAdsEnabled?.(showAds);
+    } catch {}
+  }, [showAds]);
+  // ===================================================================
 
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'N/A';
@@ -136,9 +155,7 @@ export default function Dashboard() {
     const isLongHash = /^[A-Za-z0-9_-]{20,}$/.test(base);
     const isDigits = /^\d{12,}$/.test(base);
     const isCameraPattern =
-      /^PXL_\d{8}_\d{6}/.test(base) ||
-      /^IMG_\d{8}_\d{6}/.test(base) ||
-      /^image-\d+/.test(base);
+      /^PXL_\d{8}_\d{6}/.test(base) || /^IMG_\d{8}_\d{6}/.test(base) || /^image-\d+/.test(base);
     if (isUUID || isLongHash || isDigits || isCameraPattern) return `Foto ${when}`;
     if (base.length > 40) return base.slice(0, 37) + '...';
     return base;
@@ -222,7 +239,7 @@ export default function Dashboard() {
                       return;
                     }
                     try {
-                      window.MFBridge.requestReward(1); // abre o anúncio premiado
+                      window.MFBridge.requestReward(1);
                     } catch (err) {
                       console.error(err);
                       toast.error('Não foi possível iniciar o anúncio.');
