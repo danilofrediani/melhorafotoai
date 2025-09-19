@@ -22,9 +22,9 @@ import { useIsTwa } from '@/hooks/useIsTwa';
 const PLAY_SKUS = ['credits_10', 'credits_20', 'credits_50'] as const;
 
 const googlePlayProductMap: Record<string, Partial<PackageType>> = {
-  credits_10: { images: 10, description: '10 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: false, },
-  credits_20: { images: 20, description: '20 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: true, },
-  credits_50: { images: 50, description: '50 créditos para edição\nQualidade Profissional\nSuporte Prioritário', is_most_popular: false, },
+  credits_10: { images: 10, description: '10 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: false, price: 57.00 },
+  credits_20: { images: 20, description: '20 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: true, price: 104.00 },
+  credits_50: { images: 50, description: '50 créditos para edição\nQualidade Profissional\nSuporte Prioritário', is_most_popular: false, price: 285.00 },
 };
 
 const getIcon = (type: string) => {
@@ -47,13 +47,12 @@ export default function Pricing() {
     const loadData = async () => {
       setLoading(true);
       if (isTwaMode) {
-        // Usamos SKUs fixos do Google Play
-        const transformed = (PLAY_SKUS.map((sku) => {
+        const transformed = PLAY_SKUS.map((sku) => {
           const meta = googlePlayProductMap[sku] || {};
           return {
             id: sku,
             name: `${meta.images ?? ''} Imagens`,
-            price: 0,
+            price: meta.price ?? 0,
             images: meta.images || 0,
             type: 'avulso',
             description: meta.description || '',
@@ -62,7 +61,7 @@ export default function Pricing() {
             is_active: true,
             google_play_sku: sku,
           } as PackageType;
-        }));
+        });
         setDisplayPackages(transformed);
         setLoading(false);
       } else {
@@ -114,12 +113,10 @@ export default function Pricing() {
     setIsPurchasingId(pkg.id);
 
     try {
-      // Chamamos a bridge nativa
       (window as any).MFBridge?.buyCredits(skuToSend);
 
       toast.info("Abrindo compra no Google Play...");
 
-      // Listener do evento disparado pelo nativo
       const listener = async (e: any) => {
         const { sku, purchaseToken } = e.detail || {};
         if (sku && purchaseToken) {
@@ -169,16 +166,20 @@ export default function Pricing() {
 
   const renderPackageCard = (pkg: PackageType) => {
     const purchaseHandler = isTwaMode ? handleGooglePlayPurchase : handleStripePurchase;
-    const finalPrice = isTwaMode ? "Google Play" : pkg.price.toFixed(2).replace('.', ',');
+    const finalPrice = pkg.price.toFixed(2).replace('.', ',');
     const pricePerImage = pkg.images > 0 ? (pkg.price / pkg.images).toFixed(2).replace('.', ',') : '0,00';
+
     return (
       <Card key={pkg.id} className={`relative text-left p-8 flex flex-col items-center text-center ${ pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : '' }`} >
         {pkg.is_most_popular && ( <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"><Badge className="bg-primary text-white py-1 px-3">Mais Popular</Badge></div> )}
         <div className="mb-4">{getIcon(pkg.type)}</div>
         <h3 className="text-xl font-bold mb-1">{pkg.name}</h3>
         <p className="text-sm text-gray-600 mb-4">{pkg.images} imagens {pkg.type !== 'avulso' ? 'por mês' : ''}</p>
-        <p className="text-4xl font-bold text-primary mb-1">{isTwaMode ? "Via Google Play" : `R$ ${finalPrice}`}</p>
+
+        {/* Exibe preço correto para ambos os modos */}
+        <p className="text-4xl font-bold text-primary mb-1">R$ {finalPrice}</p>
         <p className="text-sm text-gray-600 mb-6">(R$ {pricePerImage} por imagem)</p>
+
         <ul className="space-y-3 text-sm text-gray-800 text-left w-full mb-8 flex-grow">
           {pkg.description?.split('\n').map((item, index) => (
             <li key={index} className="flex items-center space-x-2"><Check className="w-4 h-4 text-green-500 flex-shrink-0" /><span>{item}</span></li>
