@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import Header from '@/components/Header';
 import { useAuth } from '@/contexts/AuthContext';
-import { ImageIcon, Upload, CreditCard, Download, Star, TrendingUp, History, Loader2 } from 'lucide-react';
+import { ImageIcon, Upload, CreditCard, Download, Star, TrendingUp, History, Loader2, PlayCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { ProcessedImage, Transaction } from '@/lib/types';
 import { useEffect, useState } from 'react';
@@ -41,43 +41,35 @@ type ProcessedImageWithOriginal = ProcessedImage & {
 };
 
 export default function Dashboard() {
-  const { user, profile, refreshProfile, isLoadingProfile } = useAuth();
+  const { user, profile, refreshProfile, isLoading: isLoadingProfile } = useAuth();
 
   const [imageHistory, setImageHistory] = useState<ProcessedImageWithOriginal[]>([]);
   const [transactions, setTransactions] = useState<(Transaction & { packages: { name: string } | null })[]>([]);
   const [isLoadingPageData, setIsLoadingPageData] = useState(true);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // =========================
-  // LISTENER DE RECOMPENSA
-  // =========================
+  // =============== LISTENER DE RECOMPENSA (já validado) ===============
   useEffect(() => {
-    // instala o listener uma única vez quando o Dashboard carrega
     const onRewardGranted = async (evt: any) => {
       const amount = Number(evt?.detail?.amount ?? 1);
-
       try {
-        // garante sessão válida
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
           toast.error('Faça login para receber créditos.');
           return;
         }
-
-        // chama a Edge Function (auth automática via supabase-js)
         const { data, error } = await supabase.functions.invoke('ad-reward', {
           body: { amount, device_hint: 'rewarded-listener' }
         });
-
         if (error) {
+          // Pode ser DAILY_LIMIT ou outro — já vem no body
+          const msg = (error as any)?.message || 'Erro ao creditar recompensa.';
           console.error('[REWARD] erro:', error);
-          toast.error('Erro ao creditar recompensa.');
+          toast.error(msg.includes('DAILY_LIMIT') ? 'Limite diário de recompensas atingido.' : 'Erro ao creditar recompensa.');
           return;
         }
-
-        // feedback + atualiza o card de créditos
-        toast.success(`+${amount} crédito(s) adicionado(s)!`);
-        await refreshProfile();
+        toast.success(`+${amount} crédito(s) adicionados!`);
+        await refreshProfile(); // atualiza o card de saldo
         console.log('[REWARD] ok:', data);
       } catch (e) {
         console.error('[REWARD] exceção:', e);
@@ -89,7 +81,7 @@ export default function Dashboard() {
     console.log('Listener REWARD_GRANTED instalado.');
     return () => window.removeEventListener('REWARD_GRANTED', onRewardGranted as EventListener);
   }, [refreshProfile]);
-  // =========================
+  // ====================================================================
 
   useEffect(() => {
     if (user && !profile) {
@@ -118,6 +110,12 @@ export default function Dashboard() {
     loadPageData();
   }, [profile]);
 
+  // ======== REGRA DE EXIBIÇÃO DE ANÚNCIOS (SEM "professional") ========
+  const hasAnyPurchase = transactions.length > 0;                 // já comprou alguma vez?
+  const hasBalance = (profile?.remaining_images ?? 0) > 0;         // tem saldo atual?
+  const showAds = !(hasAnyPurchase && hasBalance);                 // TRUE → mostrar anúncios/botão; FALSE → esconder (ad-free)
+  // ====================================================================
+
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('pt-BR', {
@@ -141,9 +139,7 @@ export default function Dashboard() {
       /^PXL_\d{8}_\d{6}/.test(base) ||
       /^IMG_\d{8}_\d{6}/.test(base) ||
       /^image-\d+/.test(base);
-    if (isUUID || isLongHash || isDigits || isCameraPattern) {
-      return `Foto ${when}`;
-    }
+    if (isUUID || isLongHash || isDigits || isCameraPattern) return `Foto ${when}`;
     if (base.length > 40) return base.slice(0, 37) + '...';
     return base;
   };
@@ -214,6 +210,35 @@ export default function Dashboard() {
               <Button variant="outline" className="w-full" asChild>
                 <Link to="/pricing"><CreditCard className="mr-2 h-4 w-4" />Comprar Planos ou Créditos</Link>
               </Button>
+
+              {/* Botão de vídeo: aparece SOMENTE quando showAds = true */}
+              {showAds && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    if (!window.MFBridge?.requestReward) {
+                      toast.info('Esse recurso está disponível no app Android.');
+                      return;
+                    }
+                    try {
+                      window.MFBridge.requestReward(1); // abre o anúncio premiado
+                    } catch (err) {
+                      console.error(err);
+                      toast.error('Não foi possível iniciar o anúncio.');
+                    }
+                  }}
+                >
+                  <PlayCircle className="mr-2 h-4 w-4" />
+                  Ganhar 1 crédito assistindo vídeo
+                </Button>
+              )}
+
+              {!showAds && (
+                <p className="text-xs text-green-600 text-center">
+                  Você está sem anúncios enquanto tiver créditos.
+                </p>
+              )}
             </CardContent>
           </Card>
 
