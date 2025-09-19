@@ -13,7 +13,6 @@ import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-
 import { useIsTwa } from '@/hooks/useIsTwa';
 
 // ======================================================
@@ -47,7 +46,7 @@ export default function Pricing() {
     const loadData = async () => {
       setLoading(true);
       if (isTwaMode) {
-        const transformed = (PLAY_SKUS.map((sku) => {
+        const transformed = PLAY_SKUS.map((sku) => {
           const meta = googlePlayProductMap[sku] || {};
           return {
             id: sku,
@@ -61,7 +60,7 @@ export default function Pricing() {
             is_active: true,
             google_play_sku: sku,
           } as PackageType;
-        }));
+        });
         setDisplayPackages(transformed);
         setLoading(false);
       } else {
@@ -120,13 +119,20 @@ export default function Pricing() {
         const { sku, purchaseToken } = e.detail || {};
         if (sku && purchaseToken) {
           toast.success("Compra aprovada. Validando...");
+
+          const session = await supabase.auth.getSession();
+          const accessToken = session.data.session?.access_token;
+
           const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
             body: { sku, purchaseToken },
+            headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
           });
+
           if (error || data?.error) {
+            console.error("[Pricing] verify-play-purchase error", error || data?.error);
             toast.error("Falha na validação com Google Play.");
           } else {
-            toast.success("Créditos adicionados com sucesso!");
+            toast.success(`Créditos adicionados: ${data.creditsAdded}`);
             await refreshProfile?.();
             navigate('/dashboard');
           }
