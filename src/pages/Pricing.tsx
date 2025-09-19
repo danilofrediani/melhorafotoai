@@ -22,9 +22,9 @@ import { useIsTwa } from '@/hooks/useIsTwa';
 const PLAY_SKUS = ['credits_10', 'credits_20', 'credits_50'] as const;
 
 const googlePlayProductMap: Record<string, Partial<PackageType>> = {
-  credits_10: { images: 10, description: '10 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: false },
-  credits_20: { images: 20, description: '20 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: true },
-  credits_50: { images: 50, description: '50 créditos para edição\nQualidade Profissional\nSuporte Prioritário', is_most_popular: false },
+  credits_10: { images: 10, price: 12.9, description: '10 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: false },
+  credits_20: { images: 20, price: 25.9, description: '20 créditos para edição\nQualidade Profissional\nSuporte via E-mail', is_most_popular: true },
+  credits_50: { images: 50, price: 59.9, description: '50 créditos para edição\nQualidade Profissional\nSuporte Prioritário', is_most_popular: false },
 };
 
 const getIcon = (type: string) => {
@@ -47,12 +47,12 @@ export default function Pricing() {
     const loadData = async () => {
       setLoading(true);
       if (isTwaMode) {
-        const transformed = PLAY_SKUS.map((sku) => {
+        const transformed = (PLAY_SKUS.map((sku) => {
           const meta = googlePlayProductMap[sku] || {};
           return {
             id: sku,
             name: `${meta.images ?? ''} Imagens`,
-            price: 0,
+            price: meta.price ?? 0,
             images: meta.images || 0,
             type: 'avulso',
             description: meta.description || '',
@@ -61,7 +61,7 @@ export default function Pricing() {
             is_active: true,
             google_play_sku: sku,
           } as PackageType;
-        });
+        }));
         setDisplayPackages(transformed);
         setLoading(false);
       } else {
@@ -84,14 +84,11 @@ export default function Pricing() {
   const handleStripePurchase = async (pkg: PackageType) => {
     if (!profile) {
       localStorage.setItem('pendingPurchasePackageId', pkg.id);
-      navigate('/login');
-      return;
+      navigate('/login'); return;
     }
     setIsPurchasingId(pkg.id);
     try {
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-        body: { package_id: pkg.id },
-      });
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', { body: { package_id: pkg.id } });
       if (error || data?.error) throw new Error(error?.message || data?.error || 'Não foi possível iniciar o pagamento.');
       if (data?.checkout_url) window.location.href = data.checkout_url;
       else throw new Error('URL de checkout não recebida.');
@@ -105,8 +102,7 @@ export default function Pricing() {
   const handleGooglePlayPurchase = async (pkg: PackageType) => {
     if (!profile) {
       toast.info('Você precisa estar logado para comprar.');
-      navigate('/login');
-      return;
+      navigate('/login'); return;
     }
     const skuToSend = pkg.google_play_sku || pkg.id;
     if (!skuToSend || !PLAY_SKUS.includes(skuToSend as any)) {
@@ -124,10 +120,8 @@ export default function Pricing() {
         const { sku, purchaseToken } = e.detail || {};
         if (sku && purchaseToken) {
           toast.success("Compra aprovada. Validando...");
-          const { data: sessionData } = await supabase.auth.getSession();
           const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
             body: { sku, purchaseToken },
-            headers: { Authorization: `Bearer ${sessionData?.session?.access_token}` },
           });
           if (error || data?.error) {
             toast.error("Falha na validação com Google Play.");
@@ -139,7 +133,9 @@ export default function Pricing() {
         }
         window.removeEventListener("PURCHASE_COMPLETED", listener);
       };
+
       window.addEventListener("PURCHASE_COMPLETED", listener);
+
     } catch (err: any) {
       toast.error(`Erro inesperado: ${err.message}`);
     } finally {
@@ -150,7 +146,7 @@ export default function Pricing() {
   // ==========================
   // Renderização
   // ==========================
-  const avulsoPackages = useMemo(() => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.images - b.images), [displayPackages]);
+  const avulsoPackages = useMemo(() => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.price - b.price), [displayPackages]);
   const mensalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'mensal').sort((a, b) => a.price - b.price), [displayPackages]);
   const profissionalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'profissional').sort((a, b) => a.price - b.price), [displayPackages]);
 
@@ -162,17 +158,18 @@ export default function Pricing() {
   };
   const firstAvailableTab = getFirstAvailableTab();
 
-  if (loading) {
-    return (<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>);
+  const finalLoading = loading;
+  if (finalLoading) {
+    return ( <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div> );
   }
 
   const renderPackageCard = (pkg: PackageType) => {
     const purchaseHandler = isTwaMode ? handleGooglePlayPurchase : handleStripePurchase;
-    const finalPrice = isTwaMode ? "Google Play" : `R$ ${pkg.price.toFixed(2).replace('.', ',')}`;
+    const finalPrice = `R$ ${pkg.price.toFixed(2).replace('.', ',')}`;
     const pricePerImage = pkg.images > 0 ? (pkg.price / pkg.images).toFixed(2).replace('.', ',') : '0,00';
     return (
-      <Card key={pkg.id} className={`relative text-left p-8 flex flex-col items-center text-center ${pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : ''}`}>
-        {pkg.is_most_popular && (<div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"><Badge className="bg-primary text-white py-1 px-3">Mais Popular</Badge></div>)}
+      <Card key={pkg.id} className={`relative text-left p-8 flex flex-col items-center text-center ${ pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : '' }`} >
+        {pkg.is_most_popular && ( <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"><Badge className="bg-primary text-white py-1 px-3">Mais Popular</Badge></div> )}
         <div className="mb-4">{getIcon(pkg.type)}</div>
         <h3 className="text-xl font-bold mb-1">{pkg.name}</h3>
         <p className="text-sm text-gray-600 mb-4">{pkg.images} imagens {pkg.type !== 'avulso' ? 'por mês' : ''}</p>
@@ -183,8 +180,8 @@ export default function Pricing() {
             <li key={index} className="flex items-center space-x-2"><Check className="w-4 h-4 text-green-500 flex-shrink-0" /><span>{item}</span></li>
           ))}
         </ul>
-        <Button onClick={() => purchaseHandler(pkg)} className="w-full bg-gradient-pricing text-white" disabled={isPurchasingId === pkg.id}>
-          {isTwaMode ? 'COMPRAR NO GOOGLE PLAY' : 'Comprar Agora'}
+        <Button onClick={() => purchaseHandler(pkg)} className="w-full bg-gradient-pricing text-white" disabled={isPurchasingId === pkg.id} >
+          {isTwaMode ? 'Comprar no Google Play' : 'Comprar Agora'}
           {isPurchasingId === pkg.id && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
         </Button>
       </Card>
@@ -213,7 +210,7 @@ export default function Pricing() {
             )}
           </Tabs>
         ) : (
-          !loading && <p className="text-gray-600 col-span-3 text-center py-10">Nenhum pacote disponível no momento.</p>
+          !finalLoading && <p className="text-gray-600 col-span-3 text-center py-10">Nenhum pacote disponível no momento.</p>
         )}
       </div>
       <Footer />
