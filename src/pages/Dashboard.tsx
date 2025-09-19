@@ -13,24 +13,19 @@ import { imageService, transactionService } from '@/lib/database';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
-// --- ✅ NOVA FUNÇÃO ASSISTENTE DE DOWNLOAD ✅ ---
 const forceDownload = async (url: string, filename: string) => {
   try {
     toast.info('Preparando download...');
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error('Não foi possível buscar a imagem para download.');
-    }
+    if (!response.ok) throw new Error('Não foi possível buscar a imagem para download.');
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
-    
     const link = document.createElement('a');
     link.href = objectUrl;
     link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
     URL.revokeObjectURL(objectUrl);
     toast.success('Download iniciado!');
   } catch (error: any) {
@@ -38,7 +33,6 @@ const forceDownload = async (url: string, filename: string) => {
     toast.error(error.message || 'Falha ao iniciar o download.');
   }
 };
-// --- FIM DA FUNÇÃO ---
 
 const categoryEmoji = { 'alimentos': '🍕', 'produtos': '📦' };
 
@@ -52,7 +46,50 @@ export default function Dashboard() {
   const [imageHistory, setImageHistory] = useState<ProcessedImageWithOriginal[]>([]);
   const [transactions, setTransactions] = useState<(Transaction & { packages: { name: string } | null })[]>([]);
   const [isLoadingPageData, setIsLoadingPageData] = useState(true);
-  const [isDownloading, setIsDownloading] = useState(false); // Estado para o botão de download
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // =========================
+  // LISTENER DE RECOMPENSA
+  // =========================
+  useEffect(() => {
+    // instala o listener uma única vez quando o Dashboard carrega
+    const onRewardGranted = async (evt: any) => {
+      const amount = Number(evt?.detail?.amount ?? 1);
+
+      try {
+        // garante sessão válida
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          toast.error('Faça login para receber créditos.');
+          return;
+        }
+
+        // chama a Edge Function (auth automática via supabase-js)
+        const { data, error } = await supabase.functions.invoke('ad-reward', {
+          body: { amount, device_hint: 'rewarded-listener' }
+        });
+
+        if (error) {
+          console.error('[REWARD] erro:', error);
+          toast.error('Erro ao creditar recompensa.');
+          return;
+        }
+
+        // feedback + atualiza o card de créditos
+        toast.success(`+${amount} crédito(s) adicionado(s)!`);
+        await refreshProfile();
+        console.log('[REWARD] ok:', data);
+      } catch (e) {
+        console.error('[REWARD] exceção:', e);
+        toast.error('Não foi possível registrar o crédito.');
+      }
+    };
+
+    window.addEventListener('REWARD_GRANTED', onRewardGranted as EventListener);
+    console.log('Listener REWARD_GRANTED instalado.');
+    return () => window.removeEventListener('REWARD_GRANTED', onRewardGranted as EventListener);
+  }, [refreshProfile]);
+  // =========================
 
   useEffect(() => {
     if (user && !profile) {
@@ -67,11 +104,7 @@ export default function Dashboard() {
         try {
           const imagesPromise = imageService.getProcessedImagesForUser(profile.id);
           const transactionsPromise = transactionService.getTransactionsForUser(profile.id);
-
-          const [images, userTransactions] = await Promise.all([
-            imagesPromise, transactionsPromise
-          ]);
-
+          const [images, userTransactions] = await Promise.all([imagesPromise, transactionsPromise]);
           setImageHistory(images as ProcessedImageWithOriginal[]);
           setTransactions(userTransactions);
         } catch (error) {
@@ -85,7 +118,6 @@ export default function Dashboard() {
     loadPageData();
   }, [profile]);
 
-  // ... (funções formatDate, friendlyTitle, friendlyDownloadName permanecem iguais)
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('pt-BR', {
@@ -151,7 +183,7 @@ export default function Dashboard() {
   };
 
   const totalImagesProcessed = imageHistory.length;
-  // @ts-ignore - Supabase pode não ter esse campo no tipo, mas ele existe
+  // @ts-ignore
   const totalDownloads = profile.download_count ?? 0;
   const categoryStats = imageHistory.reduce((acc, img) => {
     if (img.processing_type) { acc[img.processing_type] = (acc[img.processing_type] || 0) + 1; }
@@ -225,8 +257,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-           {/* ... (cards de métricas) ... */}
-           <Card>
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Imagens Restantes</CardTitle>
               <ImageIcon className="h-4 w-4 text-primary" />
@@ -301,15 +332,13 @@ export default function Dashboard() {
                           <p className="text-xs text-gray-500">{formatDate(image.created_at)}</p>
                         </div>
                       </div>
-                      
-                      {/* --- ✅ MUDANÇA APLICADA AQUI ✅ --- */}
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => handleDownloadClick(publicURL, downloadName)}
                         disabled={isDownloading}
                       >
-                         {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                        {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                       </Button>
                     </div>
                   );
@@ -327,3 +356,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
