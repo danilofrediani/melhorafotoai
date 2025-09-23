@@ -39,8 +39,9 @@ interface ProcessResult {
 }
 
 const categories = [
-  { value: 'alimentos', label: '🍕 Alimentos', description: 'Comidas, pratos, bebidas' },
-  { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce' }
+  { value: 'alimentos', label: '🍕 Alimentos', description: 'Comidas, pratos, lanches e sobremesas' },
+  { value: 'bebidas', label: '🥤 Bebidas', description: 'Fundo branco, luz de estúdio e sombra — preserva rótulos e transparência' },
+  { value: 'produtos', label: '📦 Produtos', description: 'Itens para e-commerce, fundo branco e sombra realista' }
 ];
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -376,7 +377,7 @@ export default function Upload() {
         const { data, error } = await supabase.functions.invoke('process-image', {
           body: { 
             image_path: uploadData.path, 
-            processing_type: category, 
+            processing_type: category, // agora aceita 'bebidas' também
             project_id: projectId,
             uploaded_image_id: uploadedImageId
           },
@@ -391,7 +392,6 @@ export default function Upload() {
           data.processed_path ??
           data.storage_path ??
           data.processed_file_path ??
-          // fallback: tenta extrair do processed_url, se for URL pública do Supabase
           (finalProcessedUrl ? extractProcessedPathFromUrl(finalProcessedUrl) : null) ??
           null;
 

@@ -17,6 +17,12 @@ const categories = [
     features: ['Cores naturais', 'Textura realista', 'Pronto para cardápio']
   },
   {
+    icon: '🥤',
+    title: 'Bebidas',
+    description: 'Fundo removido, luz de estúdio e sombra realista — preserva rótulos e transparência',
+    features: ['Fundo branco profissional', 'Sombra realista', 'Rótulos nítidos e vidro natural']
+  },
+  {
     icon: '📦',
     title: 'Produtos',
     description: 'Transforme fotos caseiras em imagens de estúdio para seu e-commerce',
@@ -33,7 +39,7 @@ const steps = [
   {
     step: '2',
     title: 'Selecione a Categoria',
-    description: 'Escolha entre alimentos ou produtos'
+    description: 'Escolha entre alimentos, bebidas ou produtos'
   },
   {
     step: '3',
@@ -91,7 +97,7 @@ export default function Index() {
             <span className="text-gray-900">com um Clique</span>
           </h1>
           <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Melhore suas imagens de alimentos e produtos com IA, 
+            Melhore suas imagens de alimentos, bebidas e produtos com IA, 
             mantendo <strong>100% a realidade</strong>. Qualidade profissional em segundos.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -167,7 +173,7 @@ export default function Index() {
             <p className="text-xl text-gray-600">IA treinada para cada tipo de imagem</p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 max-w-4xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
             {categories.map((category, index) => (
               <Card key={index} className="hover:shadow-lg transition-shadow">
                 <CardHeader className="text-center">
@@ -199,7 +205,7 @@ export default function Index() {
             <p className="text-xl text-gray-600">Simples, rápido e profissional</p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             {steps.map((step, index) => (
               <div key={index} className="text-center">
                 <div className="w-16 h-16 bg-gradient-fotoperfeita rounded-full flex items-center justify-center text-white text-2xl font-bold mx-auto mb-4">
@@ -261,3 +267,4 @@ export default function Index() {
     </div>
   );
 }
+

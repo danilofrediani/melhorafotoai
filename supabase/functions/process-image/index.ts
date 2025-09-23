@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
 
   try {
     console.log("--- [INÍCIO] Processamento de Imagem v.LINKED-IMAGES ---");
-    // MUDANÇA 1: Recebemos o uploaded_image_id
+    // Recebemos o uploaded_image_id
     const { image_path, processing_type, project_id, uploaded_image_id } = await req.json();
 
     if (!image_path || !processing_type) throw new Error("Parâmetro 'image_path' ou 'processing_type' ausente.");
@@ -108,12 +108,19 @@ Deno.serve(async (req) => {
     if (urlErr || !signedUrlData?.signedUrl) throw new Error("Erro ao gerar URL assinada.");
     const inputImageUrl = signedUrlData.signedUrl;
 
-    const { data: settings } = await supabaseAdmin.from("platform_settings").select("falai_prompt_food, falai_prompt_products").eq("id", 1).single();
+    // Agora buscamos também o prompt de bebidas
+    const { data: settings } = await supabaseAdmin
+      .from("platform_settings")
+      .select("falai_prompt_food, falai_prompt_products, falai_prompt_bebidas")
+      .eq("id", 1)
+      .single();
     if (!settings) throw new Error("Configurações da plataforma não encontradas.");
     
-    const promptMap: Record<string, string | null> = {
+    // Mapa de prompts, incluindo bebidas com fallback para produtos
+    const promptMap: Record<string, string | null | undefined> = {
       alimentos: settings.falai_prompt_food,
       produtos: settings.falai_prompt_products,
+      bebidas: settings.falai_prompt_bebidas || settings.falai_prompt_products
     };
     
     const prompt = promptMap[processing_type];
@@ -137,7 +144,7 @@ Deno.serve(async (req) => {
     
     await supabaseAdmin.rpc("decrement_user_credits", { user_id: user.id, credit_amount: 1 });
     
-    // MUDANÇA 2: Salvamos o uploaded_image_id no novo registro
+    // Salvamos o uploaded_image_id no novo registro
     await supabaseAdmin.from("processed_images").insert({
       user_id: user.id,
       uploaded_image_id: uploaded_image_id || null,
@@ -168,3 +175,4 @@ Deno.serve(async (req) => {
     });
   }
 });
+
