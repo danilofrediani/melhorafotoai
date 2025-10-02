@@ -20,10 +20,29 @@ import { useIsTwa } from '@/hooks/useIsTwa';
 // ======================================================
 const PLAY_SKUS = ['credits_10', 'credits_20', 'credits_50'] as const;
 
+// >>> NOVOS PREÇOS (TWA / Google Play) <<<
 const googlePlayProductMap: Record<string, Partial<PackageType>> = {
-  credits_10: { images: 10, price: 57.0, description: '10 créditos para transformar suas fotos.\nIdeal para destacar seus principais produtos ou pratos.\nIluminação profissional e sombras realistas.', is_most_popular: false },
-  credits_20: { images: 20, price: 97.0, description: '20 créditos para transformar suas fotos.\nQualidade Profissional.\nSuporte via E-mail.', is_most_popular: true },
-  credits_50: { images: 50, price: 197.0, description: '50 créditos para transformar suas fotos.\nSuporte Prioritário.', is_most_popular: false },
+  credits_10: {
+    images: 10,
+    price: 39.90,
+    description:
+      '10 créditos para transformar suas fotos.\nIdeal para destacar seus principais produtos ou pratos.\nIluminação profissional e sombras realistas.',
+    is_most_popular: false,
+  },
+  credits_20: {
+    images: 20,
+    price: 59.90,
+    description:
+      '20 créditos para transformar suas fotos.\nQualidade Profissional.\nSuporte via E-mail.',
+    is_most_popular: true,
+  },
+  credits_50: {
+    images: 50,
+    price: 129.90,
+    description:
+      '50 créditos para transformar suas fotos.\nSuporte Prioritário.',
+    is_most_popular: false,
+  },
 };
 
 const PENDING_SKU_KEY = 'pendingPurchaseSku';
@@ -51,7 +70,7 @@ export default function Pricing() {
     const loadData = async () => {
       setLoading(true);
       if (isTwaMode) {
-        const transformed = (PLAY_SKUS.map((sku) => {
+        const transformed = PLAY_SKUS.map((sku) => {
           const meta = googlePlayProductMap[sku] || {};
           return {
             id: sku,
@@ -65,7 +84,7 @@ export default function Pricing() {
             is_active: true,
             google_play_sku: sku,
           } as PackageType;
-        }));
+        });
         setDisplayPackages(transformed);
         setLoading(false);
       } else {
@@ -92,10 +111,11 @@ export default function Pricing() {
     if (pendingSku && PLAY_SKUS.includes(pendingSku as any)) {
       resumeTriedRef.current = true;
       localStorage.removeItem(PENDING_SKU_KEY);
-      const pkg = displayPackages.find(p => p.google_play_sku === pendingSku || p.id === pendingSku);
+      const pkg = displayPackages.find(
+        (p) => p.google_play_sku === pendingSku || p.id === pendingSku
+      );
       if (pkg) {
         toast.info('Retomando sua compra no Google Play…');
-        // pequena defasagem para garantir que a página está pronta
         setTimeout(() => {
           handleGooglePlayPurchase(pkg);
         }, 400);
@@ -119,7 +139,8 @@ export default function Pricing() {
         body: { package_id: pkg.id },
         headers: await authHeader(),
       });
-      if (error || (data as any)?.error) throw new Error(error?.message || (data as any)?.error || 'Não foi possível iniciar o pagamento.');
+      if (error || (data as any)?.error)
+        throw new Error(error?.message || (data as any)?.error || 'Não foi possível iniciar o pagamento.');
       if ((data as any)?.checkout_url) window.location.href = (data as any).checkout_url;
       else throw new Error('URL de checkout não recebida.');
     } catch (err: any) {
@@ -164,7 +185,6 @@ export default function Pricing() {
       (window as any).MFBridge.buyCredits(skuToSend);
       toast.info('Abrindo compra no Google Play…');
 
-      // Listener de retorno — usa { once: true } e cleanup
       const onCompleted = async (e: any) => {
         try {
           const { sku, purchaseToken, source } = e?.detail || {};
@@ -176,7 +196,6 @@ export default function Pricing() {
 
           toast.success('Compra aprovada. Validando…');
 
-          // Envia para a Edge Function com Authorization
           const { data, error } = await supabase.functions.invoke('verify-play-purchase', {
             body: { sku, purchaseToken },
             headers: await authHeader(),
@@ -202,7 +221,6 @@ export default function Pricing() {
       };
 
       window.addEventListener('PURCHASE_COMPLETED', onCompleted as any, { once: true });
-
     } catch (err: any) {
       console.error('[Pricing] Erro inesperado ao iniciar compra', err);
       toast.error(`Erro inesperado: ${err.message}`);
@@ -214,9 +232,18 @@ export default function Pricing() {
   // ==========================
   // Renderização
   // ==========================
-  const avulsoPackages = useMemo(() => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.price - b.price), [displayPackages]);
-  const mensalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'mensal').sort((a, b) => a.price - b.price), [displayPackages]);
-  const profissionalPackages = useMemo(() => displayPackages.filter((p) => p.type === 'profissional').sort((a, b) => a.price - b.price), [displayPackages]);
+  const avulsoPackages = useMemo(
+    () => displayPackages.filter((p) => p.type === 'avulso').sort((a, b) => a.price - b.price),
+    [displayPackages]
+  );
+  const mensalPackages = useMemo(
+    () => displayPackages.filter((p) => p.type === 'mensal').sort((a, b) => a.price - b.price),
+    [displayPackages]
+  );
+  const profissionalPackages = useMemo(
+    () => displayPackages.filter((p) => p.type === 'profissional').sort((a, b) => a.price - b.price),
+    [displayPackages]
+  );
 
   const getFirstAvailableTab = () => {
     if (avulsoPackages.length > 0) return 'avulso';
@@ -238,11 +265,14 @@ export default function Pricing() {
   const renderPackageCard = (pkg: PackageType) => {
     const purchaseHandler = isTwaMode ? handleGooglePlayPurchase : handleStripePurchase;
     const finalPrice = `R$ ${pkg.price.toFixed(2).replace('.', ',')}`;
-    const pricePerImage = pkg.images > 0 ? (pkg.price / pkg.images).toFixed(2).replace('.', ',') : '0,00';
+    const pricePerImage =
+      pkg.images > 0 ? (pkg.price / pkg.images).toFixed(2).replace('.', ',') : '0,00';
     return (
       <Card
         key={pkg.id}
-        className={`relative text-left p-8 flex flex-col items-center text-center ${pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : ''}`}
+        className={`relative text-left p-8 flex flex-col items-center text-center ${
+          pkg.is_most_popular ? 'border-2 border-primary shadow-lg' : ''
+        }`}
       >
         {pkg.is_most_popular && (
           <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -287,8 +317,12 @@ export default function Pricing() {
           <Tabs defaultValue={firstAvailableTab} className="w-full">
             <TabsList className="mx-auto mb-8">
               {avulsoPackages.length > 0 && <TabsTrigger value="avulso">Pacotes Avulsos</TabsTrigger>}
-              {!isTwaMode && mensalPackages.length > 0 && <TabsTrigger value="mensal">Planos Mensais</TabsTrigger>}
-              {!isTwaMode && profissionalPackages.length > 0 && <TabsTrigger value="profissional">Planos Profissionais</TabsTrigger>}
+              {!isTwaMode && mensalPackages.length > 0 && (
+                <TabsTrigger value="mensal">Planos Mensais</TabsTrigger>
+              )}
+              {!isTwaMode && profissionalPackages.length > 0 && (
+                <TabsTrigger value="profissional">Planos Profissionais</TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="avulso">
