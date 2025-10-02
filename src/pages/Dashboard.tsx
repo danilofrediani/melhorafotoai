@@ -13,20 +13,24 @@ import { imageService, transactionService } from '@/lib/database';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
-const categoryEmoji = { 'alimentos': '🍕', 'produtos': '📦' };
-
-type ProcessedImageWithOriginal = ProcessedImage & {
-  uploaded_images: { original_filename: string } | null;
-};
-
+// ===== ADIÇÃO: tipagem do MFBridge.saveFile =====
 declare global {
   interface Window {
     MFBridge?: {
       requestReward?: (amount: number) => void;
       setAdsEnabled?: (enabled: boolean) => void;
+      buyCredits?: (sku: string) => void;
+      setPaidEntitlementActive?: (active: boolean) => void;
+      saveFile?: (filename: string, base64: string, mime?: string) => void; // ✅
     };
   }
 }
+
+const categoryEmoji = { 'alimentos': '🍕', 'produtos': '📦' };
+
+type ProcessedImageWithOriginal = ProcessedImage & {
+  uploaded_images: { original_filename: string } | null;
+};
 
 export default function Dashboard() {
   const { user, profile, refreshProfile, isLoading: isLoadingProfile } = useAuth();
@@ -124,7 +128,7 @@ export default function Dashboard() {
     return `${title}_melhorada.png`;
   };
 
-  // ✅ Download via Edge Function (conta no backend)
+  // ✅ Download via Edge Function (conta no backend) + chama MFBridge.saveFile no app
   const downloadViaEdge = useCallback(
     async (bucket: 'processed-images' | 'uploaded-images', path: string, filename: string) => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -133,62 +137,60 @@ export default function Dashboard() {
       const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
       const url = `${baseUrl}/functions/v1/download-image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
 
-      // chama a Edge Function e baixa o binário
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${session.access_token}` }
-      });
-      if (!res.ok) {
-        const msg = await res.text().catch(() => '');
-        console.error('download-image error:', msg);
-        toast.error('Falha ao baixar a imagem.');
-        return;
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${session.access_token}` }
+        });
+        if (!res.ok) {
+          const msg = await res.text().catch(() => '');
+          console.error('download-image error:', msg);
+          toast.error('Falha ao baixar a imagem.');
+          return;
+        }
+
+        const blob = await res.blob();
+        const mime = blob.type || 'image/png';
+
+        // 👉 Dentro do app (TWA)
+        if (window.MFBridge?.saveFile) {
+          const buf = await blob.arrayBuffer();
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+          window.MFBridge.saveFile(filename, b64, mime);
+          toast.success('Download iniciado no app');
+        } else {
+          // 👉 Navegador (web)
+          const objectUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = objectUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(objectUrl);
+        }
+
+        // feedback/contador
+        setLocalDownloadIncrements((n) => n + 1);
+        refreshProfile().catch(() => {});
+      } catch (e) {
+        console.error('downloadViaEdge erro:', e);
+        toast.error('Erro inesperado ao iniciar download.');
       }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(objectUrl);
     },
-    []
+    [refreshProfile]
   );
 
   // Chamador com contagem imediata + refresh
   const handleDownloadClick = async (pathPublicUrl: string, filename: string, opts?: { source?: 'dashboard' | 'upload', imageId?: string, storagePath?: string }) => {
     setIsDownloading(true);
     try {
-      // extrai o storagePath se não veio pronto
-      const storagePath = opts?.storagePath ?? (() => {
-        // quando usamos getPublicUrl, ele não traz o path. Melhor manter o path salvo na imagem (processed_file_path).
-        // Aqui, como no seu histórico você já tem image.processed_file_path, passamos via opts.storagePath lá embaixo.
-        return '';
-      })();
-
+      const storagePath = opts?.storagePath || '';
       if (!storagePath) {
-        // fallback antigo (não conta no backend) — ideal é sempre passarmos storagePath
-        console.warn('Sem storagePath — use processed_file_path para contar corretamente.');
-        toast.info('Preparando download...');
-        const resp = await fetch(pathPublicUrl);
-        const blob = await resp.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = objectUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(objectUrl);
-      } else {
-        // Baixa pelo backend (contabiliza)
-        await downloadViaEdge('processed-images', storagePath, filename);
-        // feedback imediato na UI
-        setLocalDownloadIncrements(n => n + 1);
-        refreshProfile().catch(() => {});
+        toast.error('Caminho do arquivo não encontrado para download.');
+        return;
       }
+      await downloadViaEdge('processed-images', storagePath, filename);
     } finally {
       setIsDownloading(false);
     }
@@ -252,7 +254,11 @@ export default function Dashboard() {
                 <Link to="/pricing"><CreditCard className="mr-2 h-4 w-4" />Comprar Planos ou Créditos</Link>
               </Button>
 
-              {showAds && (
+              {!showAds ? (
+                <p className="text-xs text-green-600 text-center">
+                  Você está sem anúncios enquanto tiver créditos.
+                </p>
+              ) : (
                 <Button
                   variant="secondary"
                   className="w-full"
@@ -275,12 +281,6 @@ export default function Dashboard() {
                   <PlayCircle className="mr-2 h-4 w-4" />
                   {isRewardCooldown ? "Aguarde..." : "Ganhar 1 crédito assistindo vídeo"}
                 </Button>
-              )}
-
-              {!showAds && (
-                <p className="text-xs text-green-600 text-center">
-                  Você está sem anúncios enquanto tiver créditos.
-                </p>
               )}
             </CardContent>
           </Card>
