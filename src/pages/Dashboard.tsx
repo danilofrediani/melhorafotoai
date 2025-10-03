@@ -13,7 +13,6 @@ import { imageService, transactionService } from '@/lib/database';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
-// ===== ADIÇÃO: tipagem do MFBridge.saveFile =====
 declare global {
   interface Window {
     MFBridge?: {
@@ -21,7 +20,7 @@ declare global {
       setAdsEnabled?: (enabled: boolean) => void;
       buyCredits?: (sku: string) => void;
       setPaidEntitlementActive?: (active: boolean) => void;
-      saveFile?: (filename: string, base64: string, mime?: string) => void; // ✅
+      saveFileFromUrl?: (url: string, filename: string, mime?: string, authToken?: string) => void;
     };
   }
 }
@@ -128,7 +127,7 @@ export default function Dashboard() {
     return `${title}_melhorada.png`;
   };
 
-  // ✅ Download via Edge Function (conta no backend) + chama MFBridge.saveFile no app
+  // ✅ Definitivo: nativo baixa direto da URL com Authorization; web usa fallback <a download>
   const downloadViaEdge = useCallback(
     async (bucket: 'processed-images' | 'uploaded-images', path: string, filename: string) => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -138,28 +137,23 @@ export default function Dashboard() {
       const url = `${baseUrl}/functions/v1/download-image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
 
       try {
-        const res = await fetch(url, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${session.access_token}` }
-        });
-        if (!res.ok) {
-          const msg = await res.text().catch(() => '');
-          console.error('download-image error:', msg);
-          toast.error('Falha ao baixar a imagem.');
-          return;
-        }
+        if (window.MFBridge?.saveFileFromUrl) {
+          window.addEventListener('DOWNLOAD_OK', (e: any) => console.log('[DOWNLOAD_OK]', e?.detail), { once: true });
+          window.addEventListener('DOWNLOAD_FAIL', (e: any) => console.log('[DOWNLOAD_FAIL]', e?.detail), { once: true });
 
-        const blob = await res.blob();
-        const mime = blob.type || 'image/png';
-
-        // 👉 Dentro do app (TWA)
-        if (window.MFBridge?.saveFile) {
-          const buf = await blob.arrayBuffer();
-          const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-          window.MFBridge.saveFile(filename, b64, mime);
-          toast.success('Download iniciado no app');
+          console.log('[DOWNLOAD] saveFileFromUrl', { url, filename });
+          window.MFBridge.saveFileFromUrl(url, filename, 'image/png', session.access_token);
+          toast.success('Iniciando download...');
         } else {
-          // 👉 Navegador (web)
+          console.log('[DOWNLOAD] web fallback GET', url);
+          const res = await fetch(url, { headers: { 'Authorization': `Bearer ${session.access_token}` } });
+          if (!res.ok) {
+            const txt = await res.text().catch(() => '');
+            console.error('[DOWNLOAD] HTTP fail', res.status, txt);
+            toast.error('Falha ao baixar a imagem.');
+            return;
+          }
+          const blob = await res.blob();
           const objectUrl = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = objectUrl;
@@ -168,6 +162,7 @@ export default function Dashboard() {
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(objectUrl);
+          toast.success('Download iniciado');
         }
 
         // feedback/contador
@@ -422,7 +417,7 @@ export default function Dashboard() {
                         onClick={() => handleDownloadClick(publicURL, downloadName, {
                           source: 'dashboard',
                           imageId: image.id,
-                          storagePath: image.processed_file_path || '' // ✅ passa o path real do storage
+                          storagePath: image.processed_file_path || ''
                         })}
                         disabled={isDownloading}
                       >
