@@ -298,7 +298,7 @@ export default function Upload() {
 
   // ✅ Definitivo: nativo baixa direto da URL com Authorization; web usa fallback <a download>
   const downloadViaEdge = async (bucket: 'processed-images' | 'uploaded-images', path: string, filename: string) => {
-    const { data: { session) } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession();
     if (!session) { toast.error('Faça login para baixar.'); return; }
 
     const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
