@@ -20,7 +20,8 @@ declare global {
       setAdsEnabled?: (enabled: boolean) => void;
       buyCredits?: (sku: string) => void;
       setPaidEntitlementActive?: (active: boolean) => void;
-      saveFileFromUrl?: (url: string, filename: string, mime?: string, authToken?: string) => void;
+      saveFileFromUrl?: (url: string, filename: string, mime?: string, authToken?: string) => void; // ✅ novo
+      saveFile?: (filename: string, base64: string, mime?: string) => void; // fallback
     };
   }
 }
@@ -127,33 +128,50 @@ export default function Dashboard() {
     return `${title}_melhorada.png`;
   };
 
-  // ✅ Definitivo: nativo baixa direto da URL com Authorization; web usa fallback <a download>
+  // ✅ Download via Edge Function (conta no backend) — prioriza nativo saveFileFromUrl
   const downloadViaEdge = useCallback(
     async (bucket: 'processed-images' | 'uploaded-images', path: string, filename: string) => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { toast.error('Faça login para baixar.'); return; }
-
       const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
       const url = `${baseUrl}/functions/v1/download-image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
 
       try {
+        // 1) Nativo baixa direto com Authorization
         if (window.MFBridge?.saveFileFromUrl) {
-          window.addEventListener('DOWNLOAD_OK', (e: any) => console.log('[DOWNLOAD_OK]', e?.detail), { once: true });
-          window.addEventListener('DOWNLOAD_FAIL', (e: any) => console.log('[DOWNLOAD_FAIL]', e?.detail), { once: true });
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token || '';
+          console.debug('[DOWNLOAD] native saveFileFromUrl', { url, filename, hasToken: !!token });
+          window.MFBridge.saveFileFromUrl(url, filename, undefined, token);
+          toast.success('Download iniciado no app');
+          setLocalDownloadIncrements(n => n + 1);
+          refreshProfile().catch(() => {});
+          return;
+        }
 
-          console.log('[DOWNLOAD] saveFileFromUrl', { url, filename });
-          window.MFBridge.saveFileFromUrl(url, filename, 'image/png', session.access_token);
-          toast.success('Iniciando download...');
+        // 2) Fallback: baixar blob aqui e salvar via base64 no app
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { 'Authorization': session?.access_token ? `Bearer ${session.access_token}` : '' }
+        });
+        if (!res.ok) {
+          const msg = await res.text().catch(() => '');
+          console.error('download-image error:', msg);
+          toast.error('Falha ao baixar a imagem.');
+          return;
+        }
+
+        const blob = await res.blob();
+        const mime = blob.type || 'image/png';
+
+        if (window.MFBridge?.saveFile) {
+          const buf = await blob.arrayBuffer();
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+          console.debug('[DOWNLOAD] native saveFile (base64)', { filename, size: buf.byteLength });
+          window.MFBridge.saveFile(filename, b64, mime);
+          toast.success('Download iniciado no app');
         } else {
-          console.log('[DOWNLOAD] web fallback GET', url);
-          const res = await fetch(url, { headers: { 'Authorization': `Bearer ${session.access_token}` } });
-          if (!res.ok) {
-            const txt = await res.text().catch(() => '');
-            console.error('[DOWNLOAD] HTTP fail', res.status, txt);
-            toast.error('Falha ao baixar a imagem.');
-            return;
-          }
-          const blob = await res.blob();
+          // 3) Fallback web
+          console.debug('[DOWNLOAD] web fallback GET', url);
           const objectUrl = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = objectUrl;
@@ -162,11 +180,9 @@ export default function Dashboard() {
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(objectUrl);
-          toast.success('Download iniciado');
         }
 
-        // feedback/contador
-        setLocalDownloadIncrements((n) => n + 1);
+        setLocalDownloadIncrements(n => n + 1);
         refreshProfile().catch(() => {});
       } catch (e) {
         console.error('downloadViaEdge erro:', e);
@@ -417,7 +433,7 @@ export default function Dashboard() {
                         onClick={() => handleDownloadClick(publicURL, downloadName, {
                           source: 'dashboard',
                           imageId: image.id,
-                          storagePath: image.processed_file_path || ''
+                          storagePath: image.processed_file_path || '' // ✅ passa o path real do storage
                         })}
                         disabled={isDownloading}
                       >

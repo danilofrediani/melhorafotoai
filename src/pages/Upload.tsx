@@ -28,7 +28,9 @@ import CameraPicker from '@/components/CameraPicker';
 declare global {
   interface Window {
     MFBridge?: {
+      // novo caminho principal (nativo baixa da URL com Authorization)
       saveFileFromUrl?: (url: string, filename: string, mime?: string, authToken?: string) => void;
+      // fallback por base64 (permanece)
       saveFile?: (filename: string, base64: string, mime?: string) => void;
     };
   }
@@ -43,7 +45,7 @@ interface ProcessResult {
   category: string;
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'converting' | 'registering';
   processedUrl?: string | null;
-  processedPath?: string | null; // path real no bucket (p/ baixar via Edge e contar no backend)
+  processedPath?: string | null; // ✅ path real no bucket (p/ baixar via Edge e contar no backend)
   error?: string;
 }
 
@@ -118,7 +120,7 @@ export default function Upload() {
   const makeBitmap = async (file: File): Promise<ImageBitmap> => {
     try {
       const blob = file instanceof Blob ? file : new Blob([file], { type: file.type });
-      return await createImageBitmap(blob as any, { imageOrientation: 'from-image' as any });
+      return await (createImageBitmap as any)(blob, { imageOrientation: 'from-image' as any });
     } catch {
       const img = await new Promise<HTMLImageElement>((resolve, reject) => {
         const i = new Image();
@@ -133,7 +135,7 @@ export default function Upload() {
       if (!ctx) throw new Error('Canvas não suportado.');
       ctx.drawImage(img, 0, 0);
       const b = await new Promise<Blob>((res, rej) => tmp.toBlob(bb => bb ? res(bb) : rej(new Error('Blob inválido.')), 'image/png'));
-      return await createImageBitmap(b);
+      return await (createImageBitmap as any)(b);
     }
   };
 
@@ -282,13 +284,13 @@ export default function Upload() {
         await addFiles(files);
       }
     };
-    window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
+    window.addEventListener('paste', onPaste as any);
+    return () => window.removeEventListener('paste', onPaste as any);
   }, [addFiles]);
 
   // ==== Helpers de download via Edge (contabiliza no backend) ====
 
-  // Tenta extrair o path real "/<user>/<file>" de uma URL pública do Supabase
+  // Extrai o path real "/<user>/<file>" de uma URL pública do Supabase
   const extractProcessedPathFromUrl = (url: string): string | null => {
     const marker = '/processed-images/';
     const idx = url.indexOf(marker);
@@ -296,33 +298,49 @@ export default function Upload() {
     return url.substring(idx + marker.length);
   };
 
-  // ✅ Definitivo: nativo baixa direto da URL com Authorization; web usa fallback <a download>
   const downloadViaEdge = async (bucket: 'processed-images' | 'uploaded-images', path: string, filename: string) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { toast.error('Faça login para baixar.'); return; }
-
+    // Monta a URL da Edge Function (com contagem backend)
     const baseUrl = (supabase as any).supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
     const url = `${baseUrl}/functions/v1/download-image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
 
     try {
+      // 1) Caminho recomendado: nativo baixa direto da URL com Authorization
       if (window.MFBridge?.saveFileFromUrl) {
-        // listeners (debug)
-        window.addEventListener('DOWNLOAD_OK', (e: any) => console.log('[DOWNLOAD_OK]', e?.detail), { once: true });
-        window.addEventListener('DOWNLOAD_FAIL', (e: any) => console.log('[DOWNLOAD_FAIL]', e?.detail), { once: true });
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token || '';
+        console.debug('[DOWNLOAD] native saveFileFromUrl', { url, filename, hasToken: !!token });
+        window.MFBridge.saveFileFromUrl(url, filename, undefined, token);
+        toast.success('Download iniciado no app');
+        refreshProfile().catch(() => {});
+        return;
+      }
 
-        console.log('[DOWNLOAD] saveFileFromUrl', { url, filename });
-        window.MFBridge.saveFileFromUrl(url, filename, 'image/png', session.access_token);
-        toast.success('Iniciando download...');
+      // 2) Fallback nativo por base64
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Authorization': session?.access_token ? `Bearer ${session.access_token}` : '' }
+      });
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        console.error('download-image error:', msg);
+        toast.error('Falha ao baixar a imagem.');
+        return;
+      }
+
+      const blob = await res.blob();
+      const mime = blob.type || 'image/png';
+
+      if (window.MFBridge?.saveFile) {
+        const buf = await blob.arrayBuffer();
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        console.debug('[DOWNLOAD] native saveFile (base64)', { filename, size: buf.byteLength });
+        window.MFBridge.saveFile(filename, b64, mime);
+        toast.success('Download iniciado no app');
       } else {
-        console.log('[DOWNLOAD] web fallback GET', url);
-        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${session.access_token}` } });
-        if (!res.ok) {
-          const txt = await res.text().catch(() => '');
-          console.error('[DOWNLOAD] HTTP fail', res.status, txt);
-          toast.error('Falha ao baixar a imagem.');
-          return;
-        }
-        const blob = await res.blob();
+        // 3) Fallback web
+        console.debug('[DOWNLOAD] web fallback GET', url);
         const objectUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = objectUrl;
@@ -331,13 +349,12 @@ export default function Upload() {
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(objectUrl);
-        toast.success('Download iniciado');
       }
-    } catch (error: any) {
-      console.error("Erro no download:", error);
-      toast.error(error.message || 'Falha ao iniciar o download.');
-    } finally {
+
       refreshProfile().catch(() => {});
+    } catch (error: any) {
+      console.error('Erro no downloadViaEdge:', error);
+      toast.error(error?.message || 'Erro inesperado ao iniciar download.');
     }
   };
 
@@ -353,9 +370,7 @@ export default function Upload() {
     setIsProcessing(true);
 
     for (const imageToProcess of processedImages) {
-      if (imageToProcess.status !== 'pending') {
-        continue;
-      }
+      if (imageToProcess.status !== 'pending') continue;
 
       try {
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'converting' } : img));
@@ -374,7 +389,7 @@ export default function Upload() {
 
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'registering' } : img));
         toast.info(`Registrando "${imageToProcess.originalFile.name}"...`);
-        
+
         const { data: dbRecord, error: dbError } = await supabase
           .from('uploaded_images')
           .insert({
@@ -395,23 +410,23 @@ export default function Upload() {
         toast.info(`Processando "${imageToProcess.originalFile.name}" com a IA...`);
 
         const { data, error } = await supabase.functions.invoke('process-image', {
-          body: { 
-            image_path: uploadData.path, 
+          body: {
+            image_path: uploadData.path,
             processing_type: category,
             project_id: projectId,
             uploaded_image_id: uploadedImageId
           },
         });
 
-        if (error || (data && data.error)) {
-          throw new Error(error?.message || data.error || 'Erro na function');
+        if (error || (data && (data as any).error)) {
+          throw new Error((error as any)?.message || (data as any)?.error || 'Erro na function');
         }
-        
-        const finalProcessedUrl: string | null = data.processed_url ?? null;
+
+        const finalProcessedUrl: string | null = (data as any).processed_url ?? null;
         const finalProcessedPath: string | null =
-          data.processed_path ??
-          data.storage_path ??
-          data.processed_file_path ??
+          (data as any).processed_path ??
+          (data as any).storage_path ??
+          (data as any).processed_file_path ??
           (finalProcessedUrl ? extractProcessedPathFromUrl(finalProcessedUrl) : null) ??
           null;
 
@@ -432,7 +447,7 @@ export default function Upload() {
 
       } catch (err: any) {
         const errorMessage = err.message || JSON.stringify(err);
-        console.error("ERRO DETALHADO NO PROCESSAMENTO:", err);
+        console.error('ERRO DETALHADO NO PROCESSAMENTO:', err);
         setProcessedImages(prev => prev.map(img => img.id === imageToProcess.id ? { ...img, status: 'error', error: errorMessage } : img));
         toast.error(`Falha em "${imageToProcess.originalFile.name}": ${errorMessage}`, { duration: 10000 });
         continue;
@@ -441,13 +456,13 @@ export default function Upload() {
 
     setIsProcessing(false);
   };
-  
+
   const clearProcessed = () => {
     setSelectedFiles([]);
     setProcessedImages([]);
-  }
+  };
 
-  // ✅ Agora conta no backend: tenta usar processedPath; se não tiver, extrai da URL pública.
+  // ✅ Agora conta no backend; tenta usar processedPath; fallback extrai da URL pública.
   const handleDownloadClick = async (url: string, filename: string, processedPath?: string | null) => {
     try {
       setIsDownloading(true);
@@ -457,10 +472,9 @@ export default function Upload() {
         extractProcessedPathFromUrl(url);
 
       if (path) {
-        // Baixa pelo backend (contabiliza)
         await downloadViaEdge('processed-images', path, filename);
       } else {
-        // Fallback (não recomendado): baixa direto da URL pública (não contabiliza)
+        // Fallback web direto (não contabiliza) — pouco provável aqui
         console.warn('Sem processedPath — fallback para URL pública (não conta no backend).');
         const response = await fetch(url);
         if (!response.ok) throw new Error('Não foi possível buscar a imagem para download.');
@@ -475,7 +489,7 @@ export default function Upload() {
         URL.revokeObjectURL(objectUrl);
       }
     } catch (error: any) {
-      console.error("Erro no download:", error);
+      console.error('Erro no download:', error);
       toast.error(error.message || 'Falha ao iniciar o download.');
     } finally {
       setIsDownloading(false);
@@ -516,13 +530,13 @@ export default function Upload() {
 
           {/* Passo 1 */}
           {isDoneProcessing && pendingImagesCount === 0 ? (
-             <Card className="mb-8 text-center">
-               <CardHeader><CardTitle>Processamento Concluído</CardTitle></CardHeader>
-               <CardContent>
-                 <p className="mb-4">Seu lote de imagens foi processado. Você pode baixar os resultados abaixo ou iniciar um novo envio.</p>
-                 <Button onClick={clearProcessed}><UploadIcon className="mr-2 h-4 w-4" /> Enviar Novas Imagens</Button>
-               </CardContent>
-             </Card>
+            <Card className="mb-8 text-center">
+              <CardHeader><CardTitle>Processamento Concluído</CardTitle></CardHeader>
+              <CardContent>
+                <p className="mb-4">Seu lote de imagens foi processado. Você pode baixar os resultados abaixo ou iniciar um novo envio.</p>
+                <Button onClick={clearProcessed}><UploadIcon className="mr-2 h-4 w-4" /> Enviar Novas Imagens</Button>
+              </CardContent>
+            </Card>
           ) : (
             <Card className="mb-8">
               <CardHeader>
@@ -601,7 +615,7 @@ export default function Upload() {
               </Select>
             </CardContent>
           </Card>
-          
+
           {/* Botão Processar */}
           <div className="mb-8">
             <Button size="lg" className="w-full" onClick={processImages} disabled={isProcessing || pendingImagesCount === 0 || !category}>
@@ -661,8 +675,8 @@ export default function Upload() {
                             </div>
                           )}
                         </div>
-                      
-                        {/* Download via Edge (conta no backend) */}
+
+                        {/* ✅ Download via Edge (conta no backend) */}
                         {image.status === 'completed' && image.processedUrl && (
                           <Button
                             className="mt-4 w-full"
